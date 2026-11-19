@@ -1,4 +1,5 @@
 import { motion } from 'motion/react'
+import type { usePopularTitles } from '../data/usePopularTitles'
 import { rise, useMotionEnabled } from './motion'
 
 type CatalogStatus = 'idle' | 'loading' | 'ready' | 'partial' | 'stale' | 'unavailable' | 'offline' | 'limited' | 'missing'
@@ -37,4 +38,10 @@ export function CatalogFeedback({ messages, retry, loading }: {
 
 export function CatalogSkeleton() {
   return <div className="loading-tiles catalog-tiles" aria-hidden="true"><span /><span /><span /><span /></div>
+}
+
+export function PopularFeedback({ visible, loading, retry }: ReturnType<typeof usePopularTitles>) {
+  const messages = visible.map(([name, shelf]) => catalogMessage(`${name} catalog`, shelf.status, shelf.retryAfter)).filter(Boolean)
+  if (visible.some(([, shelf]) => shelf.cacheError)) messages.push(offlineCacheError)
+  return <CatalogFeedback messages={messages} loading={loading} retry={retry} />
 }

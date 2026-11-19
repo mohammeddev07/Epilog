@@ -3,7 +3,7 @@ import { useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useCatalogSeason } from '../data/useCatalog'
 import { CatalogFeedback, catalogMessage, CatalogSkeleton, offlineCacheError } from './CatalogFeedback'
-import { episodeKey, isEpisodePosition, manualEpisode, nextEpisode } from '../domain/media'
+import { episodeKey, episodeWatchState, isEpisodePosition, manualEpisode, nextEpisode } from '../domain/media'
 import type { Episode, LibraryEntry } from '../domain/media'
 import { rise, useMotionEnabled } from './motion'
 
@@ -27,15 +27,17 @@ export function EpisodeTracker({ entry, episodes = [], onEpisode }: {
     ...entry.watched.map(({ season }) => season),
     ...episodes.map(({ season }) => season),
   ])].sort((a, b) => a - b)
-  const firstUnfinished = known.find(({ number, episodeCount }) => number > 0 && (
+  const completed = entry.status === 'Completed'
+  const firstUnfinished = completed ? undefined : known.find(({ number, episodeCount }) => number > 0 && (
     episodeCount === undefined || !episodeCount || entry.watched.filter((episode) => episode.season === number && episode.number <= episodeCount).length < episodeCount
   ))
   const defaultSeason = firstUnfinished?.number ?? nextEpisode(entry)?.season ?? seasons.find((number) => number > 0) ?? seasons[0]
   const currentSeason = selection !== undefined && seasons.includes(selection) ? selection : defaultSeason
   const catalog = useCatalogSeason(entry.media.identity, currentSeason, retry)
   const available = new Map([...watched, ...[...episodes, ...(catalog.episodes ?? [])].map((episode) => [episodeKey(episode), episode] as const)])
-  const next = nextEpisode(entry) ?? (currentSeason === defaultSeason
-    ? catalog.episodes?.find((episode) => episode.season > 0 && !watched.has(episodeKey(episode)))
+  const isWatched = episodeWatchState(entry)
+  const next = nextEpisode(entry) ?? (!completed && currentSeason === defaultSeason
+    ? catalog.episodes?.find((episode) => episode.season > 0 && !isWatched(episode))
     : undefined)
   const feedback = [catalogMessage('episode catalog', catalog.status, catalog.retryAfter), catalog.cacheError ? offlineCacheError : ''].filter(Boolean)
 
@@ -92,7 +94,7 @@ export function EpisodeTracker({ entry, episodes = [], onEpisode }: {
                       <input
                         type="checkbox"
                         aria-label={`Watched ${episode.title}`}
-                        checked={watched.has(episodeKey(episode))}
+                        checked={isWatched(episode)}
                         aria-disabled={busy || undefined}
                         onChange={(event) => void save(episode, event.target.checked)}
                       />

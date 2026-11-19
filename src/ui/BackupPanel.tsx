@@ -67,7 +67,7 @@ export function BackupPanel({ onRestore }: { onRestore: (count: number) => void 
   return (
     <section aria-labelledby="backup-heading" className="settings-panel backup-panel">
       <h2 id="backup-heading">Backup and restore</h2>
-      <p className="muted">Export your statuses, completion dates, playtime, and episodes to move your library to another browser. Catalog art and provider metadata stay out of the backup.</p>
+      <p className="muted">Export your tracking history, likes, ratings, and watchlist to move your library to another browser. Catalog art and provider metadata stay out of the backup.</p>
       <div className="action-row">
         <button type="button" className="button button-secondary" disabled={busy} onClick={download}>
           <DownloadSimpleIcon size={19} /> Export backup

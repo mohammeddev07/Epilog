@@ -1,7 +1,7 @@
 import { queryLimit } from '../domain/catalog'
 import type { CatalogPayload, Provider } from '../domain/catalog'
 import { catalogCacheAge, parseCatalogKey } from '../domain/identity'
-import { isEpisodePosition } from '../domain/media'
+import { isCalendarDate, isEpisodePosition } from '../domain/media'
 import type { Episode, Media } from '../domain/media'
 
 export class CatalogResponseError extends Error {
@@ -29,6 +29,7 @@ function season(value: unknown) {
 function isEpisode(value: unknown): value is Episode {
   return isObject(value) && typeof value.title === 'string' && typeof value.season === 'number' && typeof value.number === 'number' &&
     (value.externalId === undefined || typeof value.externalId === 'string') &&
+    (value.airDate === undefined || (typeof value.airDate === 'string' && isCalendarDate(value.airDate))) &&
     isEpisodePosition({ season: value.season, number: value.number })
 }
 

@@ -4,16 +4,21 @@ import { buildBackup, planRestore } from '../domain/backup'
 import type { Backup, BackupEntry, EpisodeActivity, OwnedMedia, RestorePreview } from '../domain/backup'
 import type { CatalogPayload, Provider } from '../domain/catalog'
 import { catalogCacheAge, catalogKey, parseCatalogKey } from '../domain/identity'
-import { episodeKey, manualEpisode, updateEntry, updateEpisode } from '../domain/media'
-import type { Completion, Episode, LibraryEntry, LogDraft, Media } from '../domain/media'
+import { episodeKey, manualEpisode, updateEntry, updateEpisode, updatePreference } from '../domain/media'
+import type { Completion, Episode, LibraryEntry, LogDraft, Media, PreferenceChange, TitlePreferences } from '../domain/media'
 import { demoById } from './demo'
 
-type EntryRow = Pick<BackupEntry, 'status' | 'createdAt' | 'updatedAt' | 'playtimeMinutes'> & { mediaId: string }
+type EntryRow = Pick<BackupEntry, 'status' | 'createdAt' | 'updatedAt' | 'playtimeMinutes'> & TitlePreferences & { mediaId: string }
 type CompletionRow = Completion & { mediaId: string }
 type EpisodeRow = EpisodeActivity & { mediaId: string }
 type ResponseRow = { key: string; payload: CatalogPayload; writtenAt: number; expiresAt: number }
 
 const responseCacheLimit = 64
+
+function trackingFields(row: EntryRow) {
+  const { status, createdAt, updatedAt, playtimeMinutes, liked, rating, watchlisted } = row
+  return { status, createdAt, updatedAt, playtimeMinutes, liked, rating, watchlisted }
+}
 
 type CatalogRow = { key: string; mediaId: string; media: Media; expiresAt: number }
 
@@ -74,6 +79,9 @@ function libraryEntry(entry: BackupEntry, snapshot?: Media): LibraryEntry {
   return {
     media,
     status: entry.status,
+    liked: entry.liked,
+    rating: entry.rating,
+    watchlisted: entry.watchlisted,
     label: entry.media.label,
     playtimeMinutes: entry.playtimeMinutes,
     updatedAt: entry.updatedAt,
@@ -81,6 +89,7 @@ function libraryEntry(entry: BackupEntry, snapshot?: Media): LibraryEntry {
       const position = { season, number }
       return episodes.get(episodeKey(position)) ?? manualEpisode(position)
     }),
+    unwatched: entry.episodes.filter(({ watched }) => !watched).map(({ season, number }) => ({ season, number })),
     completions: entry.completions,
   }
 }
@@ -102,14 +111,12 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
     return entries.map((entry) => {
       const owned = byMedia.get(entry.mediaId)
       if (!owned) throw new Error('A library entry is missing its media record.')
+      const { mediaId } = entry
       return {
+        ...trackingFields(entry),
         media: owned,
-        status: entry.status,
-        createdAt: entry.createdAt,
-        updatedAt: entry.updatedAt,
-        playtimeMinutes: entry.playtimeMinutes,
-        completions: (byCompletion.get(entry.mediaId) ?? []).map(({ id, date }) => ({ id, date })),
-        episodes: (byEpisode.get(entry.mediaId) ?? []).map(({ season, number, watched, updatedAt }) => ({ season, number, watched, updatedAt })),
+        completions: (byCompletion.get(mediaId) ?? []).map(({ id, date }) => ({ id, date })),
+        episodes: (byEpisode.get(mediaId) ?? []).map(({ season, number, watched, updatedAt }) => ({ season, number, watched, updatedAt })),
       }
     })
   }
@@ -135,17 +142,14 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
       db.episodes.where({ mediaId }).toArray(),
     ])
     return {
+      ...trackingFields(row),
       media,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      status: row.status,
-      playtimeMinutes: row.playtimeMinutes,
       completions: completionRows.map(({ id, date }) => ({ id, date })),
       episodes: episodeRows.map(({ season, number, watched, updatedAt }) => ({ season, number, watched, updatedAt })),
     }
   }
 
-  async function save(media: Media, draft: LogDraft) {
+  async function writeEntry(media: Media, update: (current: LibraryEntry | undefined, now: number) => LibraryEntry) {
     return db.transaction('rw', [...records, db.catalog], async () => {
       const now = clock()
       const key = media.identity ? catalogKey(media.identity) : undefined
@@ -157,7 +161,7 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
       const owned = existing ?? await db.media.get(id) ?? { id, format: media.format, anime: Boolean(media.anime) }
       const stored = await storedEntry(id, owned)
       const updatedAt = Math.max(now, stored?.updatedAt ?? 0)
-      const entry = updateEntry(media, stored ? libraryEntry(stored, media) : undefined, draft, updatedAt)
+      const entry = update(stored ? libraryEntry(stored, media) : undefined, updatedAt)
       await db.media.put({ id, format: owned.format, anime: owned.anime, label: entry.label })
       await db.entries.put({
         mediaId: id,
@@ -165,12 +169,20 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
         createdAt: stored?.createdAt ?? now,
         updatedAt,
         playtimeMinutes: entry.playtimeMinutes,
+        liked: entry.liked,
+        rating: entry.rating,
+        watchlisted: entry.watchlisted,
       })
 
       for (const completion of entry.completions) {
         if (!stored?.completions.some((item) => item.id === completion.id)) {
           await db.completions.add({ ...completion, mediaId: id })
         }
+      }
+      if (stored && !entry.unwatched.length) {
+        const cleared: [string, number, number][] = stored.episodes.filter(({ watched }) => !watched)
+          .map(({ season, number }) => [id, season, number])
+        if (cleared.length) await db.episodes.bulkDelete(cleared)
       }
       if (media.identity && key && (!existingLink || existingLink.expiresAt <= now)) {
         const catalogedAt = Math.min(now, media.catalogedAt ?? now)
@@ -179,6 +191,14 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
       }
       return { id, created: !stored }
     })
+  }
+
+  function save(media: Media, draft: LogDraft) {
+    return writeEntry(media, (current, now) => updateEntry(media, current, draft, now))
+  }
+
+  function savePreference(media: Media, change: PreferenceChange) {
+    return writeEntry(media, (current, now) => updatePreference(media, current, change, now))
   }
 
   async function setEpisode(mediaId: string, episode: Episode, watched: boolean) {
@@ -231,6 +251,9 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
           createdAt: item.createdAt,
           updatedAt: item.updatedAt,
           playtimeMinutes: item.playtimeMinutes,
+          liked: item.liked,
+          rating: item.rating,
+          watchlisted: item.watchlisted,
         })
         await db.completions.bulkPut(item.completions.map((completion) => ({ ...completion, mediaId })))
         await db.episodes.bulkPut(item.episodes.map((episode) => ({ ...episode, mediaId })))
@@ -279,7 +302,7 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
   }
 
   return {
-    read, watch, save, setEpisode, remove, exportBackup, previewRestore, applyRestore,
+    read, watch, save, savePreference, setEpisode, remove, exportBackup, previewRestore, applyRestore,
     purgeExpired, refreshSnapshot, readResponse, cacheResponse,
     close: () => db.close(),
     deleteDatabase: () => db.delete(),

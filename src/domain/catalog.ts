@@ -16,7 +16,9 @@ export const sectionPaths = {
 
 export const queryLimit = 120
 export const searchResultLimit = 16
-export const discoverResultLimit = 8
+export const discoverResultLimit = 32
+export const popularPageSize = 8
+export const popularTitle = 'Popular This Week'
 
 export function cleanQuery(query: string) {
   return query.trim().replace(/\s+/g, ' ')
