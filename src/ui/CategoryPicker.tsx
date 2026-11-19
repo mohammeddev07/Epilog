@@ -1,23 +1,23 @@
 import { LayoutGroup, motion } from 'motion/react'
 import { useId } from 'react'
-import { categories } from '../domain/media'
 import type { Category } from '../domain/media'
 import { duration, easeOut, useMotionEnabled } from './motion'
 
-interface Props {
-  value: Category
-  onChange: (category: Category) => void
+interface Props<T extends Category> {
+  value: T
+  options: readonly T[]
+  onChange: (category: T) => void
   label: string
 }
 
-export function CategoryPicker({ value, onChange, label }: Props) {
+export function CategoryPicker<T extends Category>({ value, options, onChange, label }: Props<T>) {
   const groupId = useId()
   const animate = useMotionEnabled()
 
   return (
     <div className="category-picker" role="group" aria-label={label}>
       <LayoutGroup id={groupId}>
-        {categories.map((category) => (
+        {options.map((category) => (
           <button key={category} type="button" aria-pressed={category === value} onClick={() => onChange(category)}>
             {category === value ? (
               <motion.span

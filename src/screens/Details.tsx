@@ -1,14 +1,15 @@
-import { ArrowLeftIcon, PencilSimpleIcon, PlusIcon } from '@phosphor-icons/react'
+import { ArrowLeftIcon, EyeIcon, GameControllerIcon } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
 import { useRef, useState } from 'react'
 import { Link } from 'react-router'
-import { displayDate, formatLabel, isWatchlisted, progressText } from '../domain/media'
+import { displayDate, formatLabel, isWatchlisted, progressText, trackingAction } from '../domain/media'
 import type { LibraryEntry, Media } from '../domain/media'
 import { EpisodeTracker } from '../ui/EpisodeTracker'
 import type { SetEpisode } from '../ui/EpisodeTracker'
 import { Poster } from '../ui/MediaCards'
 import type { OpenLog } from '../ui/MediaCards'
 import { rise, useMotionEnabled } from '../ui/motion'
+import { iconSize } from '../ui/tokens'
 
 interface Props {
   media: Media
@@ -23,13 +24,14 @@ interface Props {
 export function Details({ media, entry, back, triggerId, onLog, onEpisode, onRemove }: Props) {
   const animate = useMotionEnabled()
   const episodes = media.format === 'SERIES' ? media.episodes : undefined
+  const TrackingIcon = media.format === 'GAME' ? GameControllerIcon : EyeIcon
 
   return (
     <article className="title-detail">
       {back ? (
-        <button type="button" className="text-action back-link" onClick={back}><ArrowLeftIcon size={18} /> Back</button>
+        <button type="button" className="text-action back-link" onClick={back}><ArrowLeftIcon size={iconSize.sm} /> Back</button>
       ) : (
-        <Link className="text-action back-link" to="/library"><ArrowLeftIcon size={18} /> Library</Link>
+        <Link className="text-action back-link" to="/library"><ArrowLeftIcon size={iconSize.sm} /> Library</Link>
       )}
       <div className="detail-header">
         <Poster media={media} sharedId={triggerId} eager />
@@ -49,9 +51,9 @@ export function Details({ media, entry, back, triggerId, onLog, onEpisode, onRem
               {isWatchlisted(entry) ? <span className="status-label">Watchlist</span> : null}
             </div>
           ) : null}
-          <button type="button" className="button button-primary" onClick={(event) => onLog(media, event.currentTarget)}>
-            {entry ? <PencilSimpleIcon size={20} /> : <PlusIcon size={20} weight="bold" />}
-            {entry ? 'Edit entry' : 'Log this title'}
+          <button type="button" className="button button-primary" onClick={(event) => onLog(media, event.currentTarget, entry?.status ?? 'Completed')}>
+            <TrackingIcon size={iconSize.md} weight={entry?.status === 'Completed' ? 'fill' : 'regular'} />
+            {trackingAction(media, entry)}
           </button>
         </div>
       </div>
@@ -95,7 +97,7 @@ function RemoveEntry({ onRemove }: { onRemove: () => Promise<void> }) {
   }
 
   return (
-    <section className="shelf detail-section">
+    <section className="shelf detail-section" aria-busy={busy}>
       <button type="button" className="text-action danger-action" ref={trigger} aria-expanded={confirm} aria-controls="remove-entry" onClick={() => setConfirm(!confirm)} disabled={busy}>
         Remove from library
       </button>

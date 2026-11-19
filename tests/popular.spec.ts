@@ -66,3 +66,33 @@ test('browses by a real touch swipe and by keyboard with reduced motion', async 
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
   await context.close()
 })
+
+test('moves the poster with the pointer and settles in both directions', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await page.goto('/popular?category=Movies')
+  const stage = page.getByRole('group', { name: /Poster/ })
+  const track = stage.locator('.popular-track')
+  const trackX = () => track.evaluate((element) => {
+    const transform = getComputedStyle(element).transform
+    return transform === 'none' ? 0 : new DOMMatrix(transform).m41
+  })
+  await expect(stage).toBeVisible()
+  const box = (await stage.boundingBox())!
+  const y = box.y + box.height / 2
+  await page.mouse.move(box.x + box.width * 0.75, y)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width * 0.25, y, { steps: 5 })
+  await expect.poll(trackX).toBeLessThan(-box.width * 0.35)
+  expect(await trackX()).toBeGreaterThan(-box.width * 0.75)
+  await page.mouse.up()
+  await expect(page.getByRole('heading', { name: 'Paper Moons' })).toBeVisible()
+  await expect.poll(trackX).toBeCloseTo(-box.width, 0)
+
+  await page.mouse.move(box.x + box.width * 0.25, y)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width * 0.75, y, { steps: 5 })
+  await expect.poll(trackX).toBeGreaterThan(-box.width * 0.75)
+  await page.mouse.up()
+  await expect(page.getByRole('heading', { name: 'The Last Signal' })).toBeVisible()
+  await expect.poll(trackX).toBeCloseTo(0, 0)
+})

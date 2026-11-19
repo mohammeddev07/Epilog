@@ -1,4 +1,4 @@
-import { discoverResultLimit, searchResultLimit } from '../src/domain/catalog'
+import { maxCatalogPage, searchResultLimit } from '../src/domain/catalog'
 import { catalogKey } from '../src/domain/identity'
 import type { Media } from '../src/domain/media'
 import { CatalogFailure, Cooldown, externalId, nonnegativeInteger, plainText, providerJson, record, records, validYear } from './http'
@@ -11,6 +11,7 @@ export interface GameCredentials {
 
 const gameFields = 'fields name,summary,first_release_date,cover.image_id,genres.name,alternative_names.name;'
 const requestSpacing = 260
+const popularityPageSize = 32
 
 function wait(duration: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, duration))
@@ -99,14 +100,16 @@ export class IgdbAdapter {
     return { items: output.flatMap((item) => gameMedia(item) ?? []) }
   }
 
-  async popular(config: GameCredentials) {
+  async popular(config: GameCredentials, page: number) {
+    const offset = (page - 1) * popularityPageSize
     const results = await this.request(config, 'popularity_primitives',
-      `fields game_id; where popularity_type = 1; sort value desc; limit ${discoverResultLimit * 2};`)
+      `fields game_id; where popularity_type = 1; sort value desc; limit ${popularityPageSize}; offset ${offset};`)
+    const hasMore = results.length === popularityPageSize && page < maxCatalogPage
     const ids = [...new Set(results.flatMap((item) => externalId(item.game_id) ?? []))]
-    if (!ids.length) return { items: [] }
+    if (!ids.length) return { items: [], hasMore }
     const games = await this.request(config, 'games', `${gameFields} where id = (${ids.join(',')}); limit ${ids.length};`)
     const byId = new Map(games.map((item) => [externalId(item.id), gameMedia(item)]))
-    return { items: ids.flatMap((id) => byId.get(id) ?? []).slice(0, discoverResultLimit) }
+    return { items: ids.flatMap((id) => byId.get(id) ?? []), hasMore }
   }
 
   async detail(config: GameCredentials, id: string) {

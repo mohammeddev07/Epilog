@@ -121,8 +121,9 @@ export function useProviderSearch(provider: Provider, rawQuery: string, retry: n
   return useResource(`search/${provider}`, provider, Boolean(query), 10 * minute, retry, query)
 }
 
-export function usePopularity(section: DiscoverSection, retry: number, enabled: boolean) {
-  return useResource(`popular/${sectionPaths[section]}`, section === 'Games' ? 'igdb' : 'tmdb', enabled, 20 * minute, retry, undefined, 'weekly-v1')
+export function usePopularity(section: DiscoverSection, retry: number, enabled: boolean, page: number) {
+  const path = `popular/${sectionPaths[section]}${page > 1 ? `?page=${page}` : ''}`
+  return useResource(path, section === 'Games' ? 'igdb' : 'tmdb', enabled, 20 * minute, retry, undefined, 'weekly-v2')
 }
 
 export function useCatalogDetail(identity: CatalogIdentity | undefined, retry: number) {

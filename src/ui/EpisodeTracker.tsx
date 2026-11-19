@@ -71,7 +71,7 @@ export function EpisodeTracker({ entry, episodes = [], onEpisode }: {
   }
 
   return (
-    <section className="shelf detail-section" aria-labelledby="episodes-heading">
+    <section className="shelf detail-section" aria-labelledby="episodes-heading" aria-busy={busy}>
       <h2 id="episodes-heading">Episodes</h2>
       {next ? <p className="muted">Next up · Season {next.season}, episode {next.number} · {next.title}</p> : null}
       {feedback.length ? <CatalogFeedback messages={feedback} retry={catalog.status === 'offline' ? undefined : () => setRetry((value) => value + 1)} loading={catalog.status === 'loading'} /> : null}

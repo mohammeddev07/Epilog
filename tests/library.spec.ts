@@ -6,11 +6,11 @@ import { parseBackup } from '../src/domain/backup-file'
 test('persists repeat film completions and supports confirmed removal', async ({ page }) => {
   await page.goto('/title/the-last-signal')
   const dialog = page.getByRole('dialog')
-  await page.getByRole('button', { name: 'Log this title' }).click()
+  await page.getByRole('button', { name: 'Watch', exact: true }).click()
   await dialog.getByRole('radio', { name: 'Completed' }).check()
   await dialog.getByLabel('Watch date').fill('2026-11-18')
   await dialog.getByRole('button', { name: 'Save to library' }).click()
-  await page.getByRole('button', { name: 'Edit entry' }).click()
+  await page.getByRole('button', { name: 'Watched', exact: true }).click()
   await dialog.getByRole('checkbox', { name: 'Log another completion' }).check()
   await dialog.getByLabel('Watch date').fill('2026-11-18')
   await dialog.getByRole('button', { name: 'Save changes' }).click()
@@ -27,7 +27,8 @@ test('persists repeat film completions and supports confirmed removal', async ({
 
 test('records and unmarks a manual anime episode while disconnected', async ({ page, context }) => {
   await page.goto('/title/lantern-season')
-  await page.getByRole('button', { name: 'Log this title' }).click()
+  await page.getByRole('button', { name: 'Watch', exact: true }).click()
+  await page.getByRole('radio', { name: 'Planned' }).check()
   await page.getByRole('button', { name: 'Save to library' }).click()
   await context.setOffline(true)
   await page.getByText('Log an episode by number').click()
@@ -46,7 +47,7 @@ test('records and unmarks a manual anime episode while disconnected', async ({ p
 
 test('moves a backup to a fresh profile, previews repeats and conflicts, and rejects malformed files', async ({ page, browser }) => {
   await page.goto('/title/starlight-courier')
-  await page.getByRole('button', { name: 'Log this title' }).click()
+  await page.getByRole('button', { name: 'Play', exact: true }).click()
   await page.getByRole('radio', { name: 'In progress' }).check()
   await page.getByLabel('Total hours').fill('7.5')
   await page.getByRole('button', { name: 'Save to library' }).click()
@@ -90,4 +91,49 @@ test('moves a backup to a fresh profile, previews repeats and conflicts, and rej
   } finally {
     await phone.close()
   }
+})
+
+test('shows distinct watched and watchlist totals above the four Library categories', async ({ page }) => {
+  const rows = [
+    { id: 'the-last-signal', format: 'MOVIE', anime: false, status: 'Completed', completions: [
+      { id: 'first-watch', date: '2026-11-11' }, { id: 'second-watch', date: '2026-11-18' },
+    ] },
+    { id: 'glass-tide', format: 'MOVIE', anime: false, status: 'Planned' },
+    { id: 'northbound', format: 'SERIES', anime: false, status: 'Completed' },
+    { id: 'lantern-season', format: 'SERIES', anime: true, status: 'Completed', watchlisted: true },
+    { id: 'starlight-courier', format: 'GAME', anime: false, status: 'Planned' },
+  ]
+  const entries = rows.map(({ id, format, anime, status, watchlisted, completions }) => ({
+    media: { id, format, anime }, status, watchlisted, completions: completions ?? [],
+    episodes: [], createdAt: 1, updatedAt: 2,
+  }))
+  await page.goto('/settings')
+  await page.getByLabel('Epilog backup file').setInputFiles({
+    name: 'library.json', mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ format: 'epilog-library', version: 2, entries })),
+  })
+  await page.getByRole('button', { name: 'Restore backup', exact: true }).click()
+  await page.getByRole('link', { name: 'Library', exact: true }).click()
+  const categoryTabs = page.getByRole('group', { name: 'Library categories' })
+  await expect(categoryTabs.getByRole('button')).toHaveText(['Movies', 'TV Shows', 'Anime', 'Games'])
+  const totals = page.locator('.library-totals')
+  await expect(totals.locator('dd')).toHaveText(['1', '1'])
+  const search = page.getByRole('searchbox', { name: 'Search library' })
+  await search.fill('No matching title')
+  await expect(page.getByRole('heading', { name: 'No matching titles' })).toBeVisible()
+  await expect(totals.locator('dd')).toHaveText(['1', '1'])
+  await page.getByRole('button', { name: 'Clear search' }).click()
+  await expect(search).toBeFocused()
+
+  await categoryTabs.getByRole('button', { name: 'TV Shows' }).click()
+  await expect(totals.locator('dd')).toHaveText(['1', '0'])
+  const grid = page.getByRole('list', { name: 'Library titles' })
+  await expect(grid.getByRole('link')).toHaveCount(1)
+  await expect(grid.getByRole('link', { name: /Northbound/ })).toBeVisible()
+  await categoryTabs.getByRole('button', { name: 'Anime' }).click()
+  await expect(totals.locator('dd')).toHaveText(['1', '1'])
+  await expect(grid.getByRole('link', { name: /Lantern Season/ })).toBeVisible()
+  await categoryTabs.getByRole('button', { name: 'Games' }).click()
+  await expect(totals).toContainText('Played')
+  await expect(totals.locator('dd')).toHaveText(['0', '1'])
 })

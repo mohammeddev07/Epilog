@@ -85,9 +85,9 @@ export async function fetchCatalog(path: string, provider: Provider, query: stri
   }
   const body: unknown = await response.json()
   if (!isObject(body)) throw new CatalogResponseError(502)
-  if (Array.isArray(body.items) && body.items.every(isMedia)) {
+  if (Array.isArray(body.items) && body.items.every(isMedia) && (body.hasMore === undefined || typeof body.hasMore === 'boolean')) {
     for (const item of body.items) rememberPreview(item)
-    return { items: body.items, partial: body.partial === true }
+    return { items: body.items, partial: body.partial === true, hasMore: body.hasMore === true }
   }
   if (Array.isArray(body.episodes) && body.episodes.every(isEpisode)) return { episodes: body.episodes }
   throw new CatalogResponseError(502)

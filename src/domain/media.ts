@@ -94,8 +94,13 @@ export function inCategory(media: Media, category: Category) {
   return category === 'All' ||
     (category === 'Anime' && media.anime === true) ||
     (category === 'Movies' && media.format === 'MOVIE') ||
-    (category === 'TV Shows' && media.format === 'SERIES') ||
+    (category === 'TV Shows' && media.format === 'SERIES' && !media.anime) ||
     (category === 'Games' && media.format === 'GAME')
+}
+
+export function trackingAction(media: Media, entry?: LibraryEntry) {
+  const completed = entry?.status === 'Completed'
+  return media.format === 'GAME' ? (completed ? 'Played' : 'Play') : (completed ? 'Watched' : 'Watch')
 }
 
 export function formatLabel(media: Media) {

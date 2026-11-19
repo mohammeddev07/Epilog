@@ -105,32 +105,46 @@ describe('catalog Worker', () => {
   })
 
   it('keeps the provider’s game popularity ordering and caches the public shelf', async () => {
-    const upstream = vi.fn<typeof fetch>(async (input) => {
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input)
       if (url.includes('/oauth2/')) return Response.json({ access_token: 'fixture-app-token', expires_in: 600 })
-      if (url.endsWith('/popularity_primitives')) return Response.json([{ game_id: 22 }, { game_id: 11 }, { game_id: 22 }])
+      if (url.endsWith('/popularity_primitives')) {
+        const query = String(init?.body)
+        if (query.includes('offset 32;')) return Response.json([])
+        expect(query).toContain('limit 32; offset 0;')
+        return Response.json(Array.from({ length: 32 }, (_, index) => ({ game_id: index % 2 === 0 ? 22 : 11 })))
+      }
       return Response.json([{ id: 11, name: 'Second' }, { id: 22, name: 'First' }])
     })
     const worker = createCatalogWorker(upstream)
     const request = new Request(`${origin}/api/catalog/popular/games`)
     const initial = await (await worker.fetch(request, env)).json()
-    expect(initial).toMatchObject({ items: [{ title: 'First' }, { title: 'Second' }] })
+    expect(initial).toMatchObject({ items: [{ title: 'First' }, { title: 'Second' }], hasMore: true })
     expect(await (await worker.fetch(request, env)).json()).toEqual(initial)
-    expect(upstream).toHaveBeenCalledTimes(3)
+    const next = await worker.fetch(new Request(request.url + '?page=2'), env)
+    expect(await next.json()).toEqual({ items: [], hasMore: false })
+    expect(upstream).toHaveBeenCalledTimes(4)
   })
 
-  it('collects both weekly trending pages in provider order and bounds the combined shelf', async () => {
+  it('paginates weekly TV trends, excludes anime and rejects invalid pages', async () => {
     const upstream = vi.fn<typeof fetch>(async (input) => {
       const url = new URL(String(input))
-      expect(url.pathname).toBe('/3/trending/movie/week')
+      expect(url.pathname).toBe('/3/trending/tv/week')
       const page = Number(url.searchParams.get('page'))
-      const first = page === 1 ? 1 : 20
-      return Response.json({ results: Array.from({ length: 20 }, (_, index) => ({ id: index + first, title: 'Film ' + (index + first) })) })
+      return Response.json({ total_pages: 2, results: [
+        { id: 10, name: 'Anime', original_language: 'ja', genre_ids: [16] },
+        { id: 20 + page, name: 'Weekly show ' + page },
+      ] })
     })
     const worker = createCatalogWorker(upstream)
-    const response = await worker.fetch(new Request(`${origin}/api/catalog/popular/movies`), env)
-    const body = await response.json()
-    expect(body.items.map(({ title }: { title: string }) => title)).toEqual(Array.from({ length: 32 }, (_, index) => 'Film ' + (index + 1)))
+    const url = `${origin}/api/catalog/popular/tv`
+    const first = await worker.fetch(new Request(url), env)
+    expect(await first.json()).toMatchObject({ items: [{ title: 'Weekly show 1' }], hasMore: true })
+    const second = await worker.fetch(new Request(url + '?page=2'), env)
+    expect(await second.json()).toMatchObject({ items: [{ title: 'Weekly show 2' }], hasMore: false })
+    for (const query of ['page=0', 'page=501', 'page=2&page=1', 'page=1&unknown=true']) {
+      expect((await worker.fetch(new Request(url + '?' + query), env)).status).toBe(400)
+    }
     expect(upstream).toHaveBeenCalledTimes(2)
   })
 })

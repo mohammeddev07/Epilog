@@ -55,7 +55,7 @@ test('search keeps the same focused card after saving and supports editing game 
   await expect(saved).toBeFocused()
   await saved.click()
   await expect(page.getByText('12.5 hr played')).toBeVisible()
-  await page.getByRole('button', { name: 'Edit entry' }).click()
+  await page.getByRole('button', { name: 'Play', exact: true }).click()
   await editor.getByLabel('Total hours').fill('16')
   await editor.getByRole('button', { name: 'Save changes' }).click()
   await expect(page.getByText('16 hr played')).toBeVisible()
@@ -70,7 +70,8 @@ test('tracks both series formats and keeps one anime film entry across library f
     ['lantern-season', 'First Light', 'The Old Bridge'],
   ]) {
     await page.goto(`/title/${id}`)
-    await page.getByRole('button', { name: 'Log this title' }).click()
+    await page.getByRole('button', { name: 'Watch', exact: true }).click()
+    await page.getByRole('radio', { name: 'Planned' }).check()
     await page.getByRole('button', { name: 'Save to library' }).click()
     const watched = page.getByRole('checkbox', { name: `Watched ${first}` })
     await watched.click()
@@ -154,4 +155,16 @@ test('fits the tablet layout and exposes the editor in the accessibility tree', 
       - button "Cancel"
       - button "Save to library"
   `)
+})
+
+test('clears catalog search and restores focus to the search box', async ({ page }) => {
+  await page.goto('/search')
+  const query = page.getByRole('searchbox', { name: 'Search catalog' })
+  await query.fill('Northbound')
+  await expect(page.getByRole('heading', { name: 'Search results' })).toBeVisible()
+  await page.getByRole('button', { name: 'Clear search' }).click()
+  await expect(query).toHaveValue('')
+  await expect(query).toBeFocused()
+  await expect(page.getByRole('button', { name: 'Clear search' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Browse titles' })).toBeVisible()
 })
