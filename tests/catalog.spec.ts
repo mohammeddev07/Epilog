@@ -102,7 +102,7 @@ test('deduplicates cross-listed Discover titles, preserves saved identities, and
   await expect(page.getByRole('button', { name: 'Watchlist', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await page.getByRole('link', { name: 'Moon Lantern', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Moon Lantern' })).toBeFocused()
-  await page.getByRole('button', { name: 'Edit entry' }).click()
+  await page.getByRole('button', { name: 'Watch', exact: true }).click()
   await page.getByRole('button', { name: 'Save changes' }).click()
   await page.getByRole('button', { name: 'Back' }).click()
   await expect(page.getByRole('link', { name: 'Moon Lantern', exact: true })).toBeFocused()
@@ -117,29 +117,44 @@ test('deduplicates cross-listed Discover titles, preserves saved identities, and
   await expect(grid.getByRole('link')).toHaveCount(1)
 })
 
-test('paginates an expanded weekly shelf and retains title selection across details', async ({ page }) => {
-  const movies = Array.from({ length: 18 }, (_, index) => {
+test('prefetches more titles past 32 and retains the swiped poster across details', async ({ page }) => {
+  const movies = Array.from({ length: 36 }, (_, index) => {
     const id = String(100 + index)
     return { ...moon, id: 'tmdb:movie:' + id, identity: { ...moon.identity, id }, title: 'Weekly film ' + (index + 1), anime: false }
   })
-  await page.route('**/api/catalog/popular/movies', (route) => route.fulfill({ json: { items: movies } }))
-  await page.route('**/api/catalog/detail/**', (route) => route.fulfill({ json: { items: [movies[8]] } }))
+  const requested: number[] = []
+  const releaseSecondPage = Promise.withResolvers<void>()
+  await page.route((url) => url.pathname === '/api/catalog/popular/movies', async (route) => {
+    const batch = Number(new URL(route.request().url()).searchParams.get('page') ?? 1)
+    requested.push(batch)
+    if (batch === 2) await releaseSecondPage.promise
+    const items = batch === 1 ? movies.slice(0, 16) : batch === 2 ? movies.slice(15, 32) : movies.slice(32)
+    await route.fulfill({ json: { items, hasMore: batch < 3 } })
+  })
+  await page.route('**/api/catalog/detail/**', (route) => route.fulfill({ json: { items: [movies[32]] } }))
+  await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/popular?category=Movies')
-  await expect(page.getByText('Page 1 of 3')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Previous page' })).toBeDisabled()
-  await page.getByRole('button', { name: 'Next page' }).click()
-  await expect(page.getByText('Page 2 of 3')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Weekly film 9' })).toBeVisible()
-  await page.getByRole('link', { name: 'Weekly film 9' }).click()
+  const carousel = page.getByRole('region', { name: 'Popular titles' })
+  const stage = carousel.getByRole('group', { name: /Poster/ })
+  await expect(carousel.getByRole('heading', { name: 'Weekly film 1', exact: true })).toBeVisible()
+  await expect(carousel.getByRole('button', { name: /Next|Previous/ })).toHaveCount(0)
+  await stage.focus()
+  try {
+    for (let index = 1; index < 17; index++) await page.keyboard.press('ArrowRight')
+    await expect(carousel.getByRole('heading', { name: 'Weekly film 16' })).toBeVisible()
+    await expect(carousel.getByText('Loading more titles…')).toBeVisible()
+  } finally {
+    releaseSecondPage.resolve()
+  }
+  await expect(carousel.getByRole('heading', { name: 'Weekly film 17' })).toBeVisible()
+  for (let index = 17; index < 33; index++) {
+    await page.keyboard.press('ArrowRight')
+    await expect(carousel.getByRole('heading', { name: 'Weekly film ' + (index + 1), exact: true })).toBeVisible()
+  }
+  expect(requested).toEqual([1, 2, 3])
+  await page.getByRole('link', { name: 'Weekly film 33', exact: true }).click()
   await page.getByRole('button', { name: 'Back', exact: true }).click()
-  await expect(page.getByRole('link', { name: 'Weekly film 9' })).toBeFocused()
-  await page.getByRole('button', { name: 'Previous title' }).click()
-  await expect(page.getByText('Page 1 of 3')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Weekly film 8' })).toBeVisible()
-  await page.getByRole('button', { name: 'Next page' }).click()
-  await page.getByRole('button', { name: 'Next page' }).click()
-  await expect(page.getByRole('heading', { name: 'Weekly film 17' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Next page' })).toBeDisabled()
+  await expect(carousel.getByRole('link', { name: 'Weekly film 33', exact: true })).toBeFocused()
 })
 
 test('completing a series from Popular checks episodes in every season as details load', async ({ page }) => {

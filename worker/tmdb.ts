@@ -1,12 +1,17 @@
-import { discoverResultLimit, interleave, searchResultLimit, uniqueMedia } from '../src/domain/catalog'
+import { interleave, maxCatalogPage, searchResultLimit, uniqueMedia } from '../src/domain/catalog'
 import type { DiscoverSection } from '../src/domain/catalog'
 import { catalogKey } from '../src/domain/identity'
-import { episodeKey, isCalendarDate } from '../src/domain/media'
+import { episodeKey, inCategory, isCalendarDate } from '../src/domain/media'
 import type { Episode, Media } from '../src/domain/media'
 import { CatalogFailure, Cooldown, externalId, nonnegativeInteger, plainText, providerJson, record, records, validYear } from './http'
 import type { FetchProvider, JsonObject } from './http'
 
 type WatchEntity = 'movie' | 'tv'
+interface TmdbList {
+  items: Media[]
+  totalPages?: number
+  partial?: boolean
+}
 const animationGenre = 16
 const genres: Record<number, string> = {
   12: 'Adventure', 14: 'Fantasy', 16: 'Animation', 18: 'Drama', 27: 'Horror', 28: 'Action',
@@ -66,10 +71,10 @@ export class TmdbAdapter {
     })
   }
 
-  private async list(token: string | undefined, entity: WatchEntity, path: string, params: Record<string, string>) {
-    const { results } = await this.request(token, path, { ...params, include_adult: 'false' })
+  private async list(token: string | undefined, entity: WatchEntity, path: string, params: Record<string, string>): Promise<TmdbList> {
+    const { results, total_pages: totalPages } = await this.request(token, path, { ...params, include_adult: 'false' })
     if (!Array.isArray(results)) throw new CatalogFailure(502)
-    return records(results).flatMap((item) => watchMedia(item, entity) ?? [])
+    return { items: records(results).flatMap((item) => watchMedia(item, entity) ?? []), totalPages: nonnegativeInteger(totalPages) }
   }
 
   async search(token: string | undefined, query: string) {
@@ -77,24 +82,21 @@ export class TmdbAdapter {
       this.list(token, 'movie', '/search/movie', { query }),
       this.list(token, 'tv', '/search/tv', { query }),
     ])
-    return combine(results, searchResultLimit)
+    const { items, partial } = combine(results)
+    return { items: items.slice(0, searchResultLimit), partial }
   }
 
-  async popular(token: string | undefined, category: Exclude<DiscoverSection, 'Games'>) {
-    const sort = { sort_by: 'popularity.desc' }
-    if (category === 'Anime') {
-      const filters = { ...sort, with_genres: String(animationGenre), with_original_language: 'ja' }
-      const results = await Promise.allSettled([
+  async popular(token: string | undefined, category: Exclude<DiscoverSection, 'Games'>, page: number) {
+    const params = { page: String(page) }
+    const filters = { ...params, sort_by: 'popularity.desc', with_genres: String(animationGenre), with_original_language: 'ja' }
+    const entity = category === 'Movies' ? 'movie' : 'tv'
+    const { items, partial, totalPages } = category === 'Anime'
+      ? combine(await Promise.allSettled([
         this.list(token, 'movie', '/discover/movie', filters),
         this.list(token, 'tv', '/discover/tv', filters),
-      ])
-      return combine(results, discoverResultLimit)
-    }
-    const entity = category === 'Movies' ? 'movie' : 'tv'
-    const results = await Promise.allSettled([1, 2].map((page) =>
-      this.list(token, entity, `/trending/${entity}/week`, { page: String(page) }),
-    ))
-    return combine(results, discoverResultLimit, 'ranked')
+      ]))
+      : await this.list(token, entity, `/trending/${entity}/week`, params)
+    return { items: items.filter((media) => inCategory(media, category)), partial, hasMore: page < Math.min(totalPages ?? page, maxCatalogPage) }
   }
 
   async detail(token: string | undefined, entity: WatchEntity, id: string) {
@@ -125,12 +127,15 @@ export class TmdbAdapter {
   }
 }
 
-function combine(results: PromiseSettledResult<Media[]>[], limit: number, order: 'interleave' | 'ranked' = 'interleave') {
+function combine(results: PromiseSettledResult<TmdbList>[]): TmdbList {
   const available = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
   if (!available.length) {
     const first = results.find((result) => result.status === 'rejected')
     throw first?.reason ?? new CatalogFailure(502)
   }
-  const ordered = order === 'ranked' ? available.flat() : interleave(available)
-  return { items: uniqueMedia(ordered).slice(0, limit), partial: available.length < results.length || undefined }
+  return {
+    items: uniqueMedia(interleave(available.map(({ items }) => items))),
+    partial: available.length < results.length || undefined,
+    totalPages: Math.max(...available.map(({ totalPages }) => totalPages ?? 0)),
+  }
 }

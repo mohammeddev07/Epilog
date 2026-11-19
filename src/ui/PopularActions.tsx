@@ -1,7 +1,7 @@
 import { BookmarkSimpleIcon, EyeIcon, GameControllerIcon, HeartIcon, StarIcon, XIcon } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
 import { useRef, useState } from 'react'
-import { isWatchlisted, ratings } from '../domain/media'
+import { isWatchlisted, ratings, trackingAction } from '../domain/media'
 import type { LibraryEntry, Media, PreferenceChange } from '../domain/media'
 import type { OpenLog } from './MediaCards'
 import { rise, useMotionEnabled } from './motion'
@@ -29,7 +29,7 @@ export function PopularActions({ media, entry, onInteract, onLog, onPreference }
   const completed = entry?.status === 'Completed'
   const isGame = media.format === 'GAME'
   const WatchIcon = isGame ? GameControllerIcon : EyeIcon
-  const watch = isGame ? completed ? 'Played' : 'Play' : completed ? 'Watched' : 'Watch'
+  const watch = trackingAction(media, entry)
   const liked = entry?.liked === true
   const watchlisted = isWatchlisted(entry)
 

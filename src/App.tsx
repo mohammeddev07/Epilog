@@ -3,7 +3,7 @@ import { AnimatePresence, LayoutGroup, motion, MotionConfig } from 'motion/react
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, matchPath, NavLink, useLocation, useNavigate } from 'react-router'
 import { demoById } from './data/demo'
-import { mediaKey } from './domain/catalog'
+import { discoverSections, mediaKey } from './domain/catalog'
 import { parseCatalogKey } from './domain/identity'
 import { peekPreview } from './data/catalog-client'
 import { useCatalogDetail, useConnection, demoMode } from './data/useCatalog'
@@ -90,6 +90,7 @@ export function App() {
   const browseParams = new URLSearchParams(query)
   const rawStatus = browseParams.get('status')
   const defaultStatus = rawStatus === 'Watchlist' ? rawStatus : statuses.find((status) => status === rawStatus) ?? null
+  const defaultCategory = discoverSections.find((section) => section === browseParams.get('category'))
 
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -222,7 +223,7 @@ export function App() {
                 animate="visible"
               >
                 {path === '/' ? <Dashboard entries={entries} onLog={openLog} />
-                  : path === '/library' ? <Library entries={entries} defaultStatus={defaultStatus} highlightId={highlightId} />
+                  : path === '/library' ? <Library entries={entries} defaultStatus={defaultStatus} defaultCategory={defaultCategory} highlightId={highlightId} />
                   : path === '/popular' ? <Popular entries={entries} query={query ?? ''} onLog={openLog} onPreference={savePreference} />
                   : path === '/search' ? <Search entries={entries} onLog={(media, trigger) => openLog(media, trigger, browseParams.get('action') === 'watch' ? 'Completed' : undefined)} />
                   : path === '/settings' ? <Settings theme={theme} onTheme={changeTheme} storageError={storageError} onRestore={(count) => announce(count ? 'Backup restored.' : 'Backup reviewed. Your library is already up to date.')} />

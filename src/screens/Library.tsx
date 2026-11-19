@@ -1,30 +1,36 @@
-import { BooksIcon, EyeIcon, MagnifyingGlassIcon } from '@phosphor-icons/react'
+import { BooksIcon, EyeIcon } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
 import { useState } from 'react'
 import { Link } from 'react-router'
+import { discoverSections } from '../domain/catalog'
+import type { DiscoverSection } from '../domain/catalog'
 import { inCategory, isWatchlisted, matchesQuery, statuses } from '../domain/media'
-import type { Category, LibraryEntry } from '../domain/media'
+import type { LibraryEntry } from '../domain/media'
 import { CategoryPicker } from '../ui/CategoryPicker'
 import { PosterGrid } from '../ui/MediaCards'
 import { rise, useMotionEnabled } from '../ui/motion'
+import { SearchField } from '../ui/SearchField'
 
-export function Library({ entries, defaultStatus, highlightId }: {
+export function Library({ entries, defaultStatus, defaultCategory, highlightId }: {
   entries: ReadonlyMap<string, LibraryEntry>
   defaultStatus: string | null
+  defaultCategory?: DiscoverSection
   highlightId?: string
 }) {
-  const [category, setCategory] = useState<Category>('All')
+  const [category, setCategory] = useState(() => defaultCategory ?? discoverSections.find((category) =>
+    [...entries.values()].some((entry) => inCategory(entry.media, category))) ?? discoverSections[0])
   const [status, setStatus] = useState(defaultStatus ?? '')
   const [genre, setGenre] = useState('')
   const [year, setYear] = useState('')
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState('recent')
   const animate = useMotionEnabled()
-  const all = [...entries.values()]
-  const genres = [...new Set(all.flatMap(({ media }) => media.genres))].sort()
-  const years = [...new Set(all.flatMap(({ media }) => media.year ?? []))].sort((a, b) => b - a)
-  const visible = all.filter((entry) => (
-    inCategory(entry.media, category) &&
+  const categoryEntries = [...entries.values()].filter(({ media }) => inCategory(media, category))
+  const genres = [...new Set(categoryEntries.flatMap(({ media }) => media.genres))].sort()
+  const years = [...new Set(categoryEntries.flatMap(({ media }) => media.year ?? []))].sort((a, b) => b - a)
+  const watched = categoryEntries.filter(({ status, completions }) => status === 'Completed' || completions.length > 0).length
+  const watchlisted = categoryEntries.filter(isWatchlisted).length
+  const visible = categoryEntries.filter((entry) => (
     matchesQuery(entry.media, query) &&
     (!status || (status === 'Watchlist' ? isWatchlisted(entry) : entry.status === status)) &&
     (!genre || entry.media.genres.includes(genre)) &&
@@ -32,7 +38,6 @@ export function Library({ entries, defaultStatus, highlightId }: {
   )).sort((a, b) => sort === 'title' ? a.media.title.localeCompare(b.media.title) : b.updatedAt - a.updatedAt)
 
   function clearFilters() {
-    setCategory('All')
     setStatus('')
     setGenre('')
     setYear('')
@@ -47,17 +52,28 @@ export function Library({ entries, defaultStatus, highlightId }: {
       </header>
       <section aria-label="Saved titles">
         <div className="library-tabs">
-          <CategoryPicker value={category} onChange={setCategory} label="Library categories" />
+          <CategoryPicker value={category} options={discoverSections} label="Library categories" onChange={(next) => {
+            if (next === category) return
+            setCategory(next)
+            setGenre('')
+            setYear('')
+          }} />
           <motion.span className="muted result-count" key={visible.length} role="status" initial={animate ? 'hidden' : false} animate="visible" variants={rise}>
             {visible.length} {visible.length === 1 ? 'title' : 'titles'}
           </motion.span>
         </div>
+        <dl className="library-totals" aria-label={`${category} totals`} aria-live="polite">
+          <div>
+            <dt>{category === 'Games' ? 'Played' : 'Watched'}</dt>
+            <motion.dd key={watched} variants={rise} initial={animate ? 'hidden' : false} animate="visible">{watched}</motion.dd>
+          </div>
+          <div>
+            <dt>Watchlist</dt>
+            <motion.dd key={watchlisted} variants={rise} initial={animate ? 'hidden' : false} animate="visible">{watchlisted}</motion.dd>
+          </div>
+        </dl>
         <div className="library-tools">
-          <label className="search-field">
-            <MagnifyingGlassIcon size={19} />
-            <span className="sr-only">Search library</span>
-            <input type="search" placeholder="Search library" value={query} onChange={(event) => setQuery(event.target.value)} />
-          </label>
+          <SearchField label="Search library" placeholder="Search library" value={query} onChange={setQuery} />
           <label><span className="sr-only">Status filter</span><select value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="">All statuses</option>
             <option value="Watchlist">Watchlist</option>

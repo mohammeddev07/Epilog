@@ -5,6 +5,7 @@ import type { Transition, Variants } from 'motion/react'
 export const duration = { fast: 0.15, filter: 0.18, sheet: 0.24, base: 0.25, slow: 0.4 }
 export const easeOut = [0.2, 0.75, 0.25, 1] as const
 export const layoutSpring = { type: 'spring', stiffness: 380, damping: 34, mass: 0.85 } satisfies Transition
+export const carouselSpring = { type: 'spring', stiffness: 290, damping: 30, mass: 0.85 } satisfies Transition
 const stagger = 0.035
 
 export const motionProperties = {
@@ -45,9 +46,4 @@ export const rise = {
 export const crossfade = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { duration: duration.filter, ease: easeOut } },
-} satisfies Variants
-
-export const slide = {
-  hidden: (direction: number) => ({ opacity: 0, x: direction * 24 }),
-  visible: { opacity: 1, x: 0, transition: { duration: duration.base, ease: easeOut } },
 } satisfies Variants
