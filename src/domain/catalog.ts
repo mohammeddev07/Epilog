@@ -16,8 +16,8 @@ export const sectionPaths = {
 
 export const queryLimit = 120
 export const searchResultLimit = 16
-export const discoverResultLimit = 32
-export const popularPageSize = 8
+export const popularPreviewSize = 8
+export const maxCatalogPage = 500
 export const popularTitle = 'Popular This Week'
 
 export function cleanQuery(query: string) {
@@ -50,6 +50,7 @@ export function providerDisplayName(provider: CatalogIdentity['provider']) {
 export interface CatalogItems {
   items: Media[]
   partial?: boolean
+  hasMore?: boolean
 }
 
 export type CatalogPayload = CatalogItems | { episodes: import('./media').Episode[] }

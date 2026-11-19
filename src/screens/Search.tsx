@@ -1,4 +1,3 @@
-import { MagnifyingGlassIcon } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
 import { useState } from 'react'
 import { demoCatalog } from '../data/demo'
@@ -10,6 +9,7 @@ import { CatalogFeedback, catalogMessage, CatalogSkeleton, offlineCacheError } f
 import { PosterGrid } from '../ui/MediaCards'
 import type { OpenLog } from '../ui/MediaCards'
 import { rise, useMotionEnabled } from '../ui/motion'
+import { SearchField } from '../ui/SearchField'
 
 export function Search({ entries, onLog }: {
   entries: ReadonlyMap<string, LibraryEntry>
@@ -39,14 +39,10 @@ export function Search({ entries, onLog }: {
       <header className="page-intro">
         <div><h1 tabIndex={-1}>Search</h1><p>Find a movie, TV show, anime, or game to log.</p></div>
       </header>
-      <label className="search-field main-search">
-        <MagnifyingGlassIcon size={22} />
-        <span className="sr-only">Search catalog</span>
-        <input id="catalog-search" type="search" placeholder="Search titles" maxLength={queryLimit} value={query} onChange={(event) => {
-          setQuery(event.target.value)
-          setRetry(0)
-        }} />
-      </label>
+      <SearchField id="catalog-search" className="main-search" label="Search catalog" placeholder="Search titles" value={query} maxLength={queryLimit} onChange={(value) => {
+        setQuery(value)
+        setRetry(0)
+      }} />
       <div className="sr-only" role="status">{found} {found === 1 ? 'result' : 'results'}</div>
       <CatalogFeedback messages={messages} retry={connected && error ? () => setRetry((value) => value + 1) : undefined} loading={loading} />
       {found ? (

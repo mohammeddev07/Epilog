@@ -15,6 +15,8 @@ describe('catalog and tracking rules', () => {
     expect(inCategory(film, 'Anime')).toBe(true)
     expect(inCategory(film, 'Movies')).toBe(true)
     expect(inCategory(film, 'TV Shows')).toBe(false)
+    expect(inCategory(series, 'TV Shows')).toBe(false)
+    expect(inCategory(series, 'Anime')).toBe(true)
     expect(matchesQuery(series, 'chochin 2026')).toBe(true)
   })
 

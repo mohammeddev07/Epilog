@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useState } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 import { rise, useMotionEnabled } from './motion'
+import { iconSize } from './tokens'
 
 export default function InstallStatus() {
   const [error, setError] = useState('')
@@ -30,6 +31,7 @@ export default function InstallStatus() {
       {needsUpdate || error ? (
         <motion.aside
           className="update-banner"
+          aria-busy={busy}
           aria-label="App update"
           variants={rise}
           initial={animate ? 'hidden' : false}
@@ -41,7 +43,7 @@ export default function InstallStatus() {
               <p role="status">An Epilog update is ready.</p>
               <div className="action-row">
                 <button type="button" className="button button-primary" disabled={busy} onClick={() => void update()}>
-                  <ArrowClockwiseIcon size={18} /> {busy ? 'Updating…' : 'Update and reload'}
+                  <ArrowClockwiseIcon size={iconSize.sm} /> {busy ? 'Updating…' : 'Update and reload'}
                 </button>
                 <button type="button" className="button button-secondary" disabled={busy} onClick={() => setNeedsUpdate(false)}>Later</button>
               </div>

@@ -38,7 +38,8 @@ test('has an installable manifest and saves episodes after an offline deep-link 
   expect(manifest).toMatchObject({ name: 'Epilog', display: 'standalone', start_url: '/' })
   expect(manifest.icons).toEqual(expect.arrayContaining([expect.objectContaining({ sizes: '192x192' }), expect.objectContaining({ sizes: '512x512', purpose: 'maskable' })]))
 
-  await page.getByRole('button', { name: 'Log this title' }).click()
+  await page.getByRole('button', { name: 'Watch', exact: true }).click()
+  await page.getByRole('radio', { name: 'Planned' }).check()
   await page.getByLabel('Title for backups').fill('My Moonlight Series')
   await page.getByRole('button', { name: 'Save to library' }).click()
   await expect(page.getByRole('checkbox', { name: 'Watched First episode' })).toBeVisible()
@@ -86,9 +87,9 @@ test('installs an app update on request and keeps the IndexedDB library', async 
     await page.route('**/api/catalog/detail/**', (route) => route.fulfill({ json: { items: [watch] } }))
     await page.goto(origin + '/title/tmdb%3Atv%3A42')
     await waitForOfflineShell(page)
-    await page.getByRole('button', { name: 'Log this title' }).click()
+    await page.getByRole('button', { name: 'Watch', exact: true }).click()
     await page.getByRole('button', { name: 'Save to library' }).click()
-    await expect(page.getByRole('button', { name: 'Edit entry' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Watched', exact: true })).toBeVisible()
     const previous = await page.evaluate(() => performance.timeOrigin)
     release = 2
     await page.evaluate(async () => {
@@ -100,7 +101,7 @@ test('installs an app update on request and keeps the IndexedDB library', async 
       page.getByRole('button', { name: 'Update and reload' }).click(),
     ])
     expect(await page.evaluate(() => performance.timeOrigin)).not.toBe(previous)
-    await expect(page.getByRole('button', { name: 'Edit entry' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Watched', exact: true })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Moonlight Series' })).toBeVisible()
   } finally {
     server.closeAllConnections()

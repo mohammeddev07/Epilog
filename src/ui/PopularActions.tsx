@@ -1,11 +1,13 @@
-import { BookmarkSimpleIcon, EyeIcon, GameControllerIcon, HeartIcon, StarIcon, XIcon } from '@phosphor-icons/react'
+import { BookmarkSimpleIcon, EyeIcon, GameControllerIcon, HeartIcon, StarIcon } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
 import { useRef, useState } from 'react'
-import { isWatchlisted, ratings } from '../domain/media'
+import { isWatchlisted, ratings, trackingAction } from '../domain/media'
 import type { LibraryEntry, Media, PreferenceChange } from '../domain/media'
 import type { OpenLog } from './MediaCards'
 import { rise, useMotionEnabled } from './motion'
 import { useModal } from './useModal'
+import { SheetHeader } from './Sheet'
+import { iconSize } from './tokens'
 
 export type SavePreference = (media: Media, change: PreferenceChange) => Promise<void>
 
@@ -29,7 +31,7 @@ export function PopularActions({ media, entry, onInteract, onLog, onPreference }
   const completed = entry?.status === 'Completed'
   const isGame = media.format === 'GAME'
   const WatchIcon = isGame ? GameControllerIcon : EyeIcon
-  const watch = isGame ? completed ? 'Played' : 'Play' : completed ? 'Watched' : 'Watch'
+  const watch = trackingAction(media, entry)
   const liked = entry?.liked === true
   const watchlisted = isWatchlisted(entry)
 
@@ -68,19 +70,19 @@ export function PopularActions({ media, entry, onInteract, onLog, onPreference }
           }}
         >
           <motion.span key={watch} variants={rise} initial={animate ? 'hidden' : false} animate="visible" aria-hidden="true">
-            <WatchIcon size={24} weight={completed ? 'fill' : 'regular'} />
+            <WatchIcon size={iconSize.xl} weight={completed ? 'fill' : 'regular'} />
           </motion.span>
           {watch}
         </button>
         <button type="button" className="button popular-action" aria-pressed={liked} aria-disabled={busy} onClick={() => void save({ kind: 'like', value: !liked })}>
           <motion.span key={String(liked)} variants={rise} initial={animate ? 'hidden' : false} animate="visible" aria-hidden="true">
-            <HeartIcon size={24} weight={liked ? 'fill' : 'regular'} />
+            <HeartIcon size={iconSize.xl} weight={liked ? 'fill' : 'regular'} />
           </motion.span>
           Like
         </button>
         <button
           ref={rateButton} type="button" className="button popular-action" data-active={Boolean(rating) || undefined}
-          aria-haspopup="dialog" aria-label={rating ? 'Rate, ' + rating + ' out of 5 stars' : undefined} aria-disabled={busy}
+          aria-haspopup="dialog" aria-label={rating ? 'Rate, ' + rating + '/5 stars' : undefined} aria-disabled={busy}
           onClick={() => {
             if (pending.current) return
             onInteract()
@@ -88,26 +90,22 @@ export function PopularActions({ media, entry, onInteract, onLog, onPreference }
             setRatingOpen(true)
           }}
         >
-          <StarIcon size={24} weight={rating ? 'fill' : 'regular'} />
+          <StarIcon size={iconSize.xl} weight={rating ? 'fill' : 'regular'} />
           <motion.span key={rating ?? 'unrated'} variants={rise} initial={animate ? 'hidden' : false} animate="visible">
             {rating ? rating + '/5' : 'Rate'}
           </motion.span>
         </button>
         <button type="button" className="button popular-action" aria-pressed={watchlisted} aria-disabled={busy} onClick={() => void save({ kind: 'watchlist', value: !watchlisted })}>
           <motion.span key={String(watchlisted)} variants={rise} initial={animate ? 'hidden' : false} animate="visible" aria-hidden="true">
-            <BookmarkSimpleIcon size={24} weight={watchlisted ? 'fill' : 'regular'} />
+            <BookmarkSimpleIcon size={iconSize.xl} weight={watchlisted ? 'fill' : 'regular'} />
           </motion.span>
           Watchlist
         </button>
       </div>
       {error && !ratingOpen ? <motion.p role="alert" className="form-error" variants={rise} initial={animate ? 'hidden' : false} animate="visible">{error}</motion.p> : null}
-      <dialog ref={dialog} className="log-dialog" aria-labelledby="rating-heading" onCancel={(event) => { event.preventDefault(); closeRating() }}>
-        <div className="log-form">
-          <div className="dialog-grip" aria-hidden="true" />
-          <div className="dialog-title">
-            <h2 id="rating-heading">Rate {media.title}</h2>
-            <button type="button" className="icon-button" aria-label="Close rating" onClick={closeRating} disabled={busy}><XIcon size={22} /></button>
-          </div>
+      <dialog ref={dialog} className="sheet" aria-labelledby="rating-heading" onCancel={(event) => { event.preventDefault(); closeRating() }}>
+        <div className="sheet-body">
+          <SheetHeader id="rating-heading" title={`Rate ${media.title}`} closeLabel="Close rating" onClose={closeRating} disabled={busy} />
           <div className="rating-options" role="group" aria-label="Stars">
             {ratings.map((value) => (
               <button
@@ -116,7 +114,7 @@ export function PopularActions({ media, entry, onInteract, onLog, onPreference }
                 data-rating-focus={value === (rating ?? ratings[0]) || undefined}
                 onClick={() => void save({ kind: 'rating', value })}
               >
-                <StarIcon size={23} weight={rating && value <= rating ? 'fill' : 'regular'} />
+                <StarIcon size={iconSize.xl} weight={rating && value <= rating ? 'fill' : 'regular'} />
               </button>
             ))}
           </div>

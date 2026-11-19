@@ -1,4 +1,3 @@
-import { XIcon } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
 import { useRef, useState } from 'react'
 import type { FormEvent } from 'react'
@@ -7,6 +6,7 @@ import type { LibraryEntry, LogDraft, Media, Status } from '../domain/media'
 import { Poster } from './MediaCards'
 import { rise, useMotionEnabled } from './motion'
 import { useModal } from './useModal'
+import { SheetHeader } from './Sheet'
 
 export interface LogSession {
   key: number
@@ -30,7 +30,7 @@ export function LogDialog({ session, open, entry, onClose, onSave }: Props) {
   return (
     <dialog
       ref={dialog}
-      className="log-dialog"
+      className="sheet"
       aria-labelledby="log-heading"
       onCancel={(event) => {
         event.preventDefault()
@@ -103,14 +103,8 @@ function LogForm({ media, initialStatus, entry, busy, setBusy, onClose, onSave }
   }
 
   return (
-    <form onSubmit={submit} className="log-form" noValidate aria-busy={busy}>
-      <div className="dialog-grip" aria-hidden="true" />
-      <div className="dialog-title">
-        <h2 id="log-heading">{entry ? 'Edit library entry' : 'Log a title'}</h2>
-        <button type="button" className="icon-button" aria-label="Close log editor" onClick={onClose} disabled={busy}>
-          <XIcon size={22} />
-        </button>
-      </div>
+    <form onSubmit={submit} className="sheet-body" noValidate aria-busy={busy}>
+      <SheetHeader id="log-heading" title={entry ? 'Edit library entry' : 'Log a title'} closeLabel="Close log editor" onClose={onClose} disabled={busy} />
       <div className="log-summary">
         <Poster media={media} />
         <div><strong>{media.title}</strong><span className="muted">{formatLabel(media)}{media.year ? ` · ${media.year}` : ''}</span></div>
@@ -160,7 +154,7 @@ function LogForm({ media, initialStatus, entry, busy, setBusy, onClose, onSave }
           {error}
         </motion.p>
       ) : null}
-      <div className="dialog-actions">
+      <div className="sheet-actions">
         <button type="button" className="button button-secondary" onClick={onClose} disabled={busy}>Cancel</button>
         <button type="submit" className="button button-primary" disabled={busy}>
           {busy ? 'Saving…' : entry ? 'Save changes' : 'Save to library'}

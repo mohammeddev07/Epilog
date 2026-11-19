@@ -1,23 +1,23 @@
-import { ArrowLeftIcon, CaretLeftIcon, CaretRightIcon } from '@phosphor-icons/react'
+import { ArrowLeftIcon } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
-import { useRef, useState } from 'react'
-import type { PointerEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { usePopularTitles } from '../data/usePopularTitles'
-import { mediaKey, popularPageSize, popularTitle } from '../domain/catalog'
-import { formatLabel } from '../domain/media'
-import type { Category, LibraryEntry } from '../domain/media'
+import { mediaKey, popularTitle } from '../domain/catalog'
+import { categories, formatLabel } from '../domain/media'
+import type { LibraryEntry } from '../domain/media'
 import { PopularFeedback } from '../ui/CatalogFeedback'
 import { CategoryPicker } from '../ui/CategoryPicker'
-import { DetailLink, Poster } from '../ui/MediaCards'
+import { DetailLink } from '../ui/MediaCards'
 import type { OpenLog } from '../ui/MediaCards'
-import { rise, slide, useMotionEnabled } from '../ui/motion'
+import { rise, useMotionEnabled } from '../ui/motion'
 import { PopularActions } from '../ui/PopularActions'
 import type { SavePreference } from '../ui/PopularActions'
 import { readPopularLocation } from '../ui/popular-navigation'
+import { popularPosterId, SwipePosters } from '../ui/SwipePosters'
+import { iconSize } from '../ui/tokens'
 
-const swipeDistance = 45
-const detailTriggerId = 'popular-title-link'
+const prefetchDistance = 3
 
 interface Props {
   entries: ReadonlyMap<string, LibraryEntry>
@@ -26,100 +26,80 @@ interface Props {
   onPreference: SavePreference
 }
 
-export function Popular({ entries, query, onLog, onPreference }: Props) {
-  const initial = readPopularLocation(query)
-  const [category, setCategory] = useState(initial.category)
-  const [selection, setSelection] = useState({ key: initial.title, direction: 0 })
-  const pointer = useRef<{ id: number; x: number; y: number } | undefined>(undefined)
-  const animate = useMotionEnabled()
-  const feed = usePopularTitles(category)
-  const { items, loading } = feed
-  const selectedIndex = items.findIndex((media) => mediaKey(media) === selection.key)
-  const index = Math.max(0, selectedIndex)
-  const waitingForSelection = selection.key !== null && selectedIndex < 0 && loading
-  const media = waitingForSelection ? undefined : items[index]
-  const previous = items[index - 1]
-  const next = items[index + 1]
-  const key = media ? mediaKey(media) : undefined
-  const entry = media ? entries.get(media.id) ?? [...entries.values()].find((entry) => mediaKey(entry.media) === key) : undefined
-  const page = 1 + Math.floor(index / popularPageSize)
-  const lastPage = Math.ceil(items.length / popularPageSize)
-
-  function selectCategory(category: Category) {
-    setCategory(category)
-    setSelection({ key: null, direction: 0 })
-  }
-
-  function goTo(target: number) {
-    const result = items[target]
-    if (!result || target === index) return
-    setSelection({ key: mediaKey(result), direction: Math.sign(target - index) })
-  }
-
-  function beginSwipe(event: PointerEvent<HTMLDivElement>) {
-    if (!event.isPrimary || event.button !== 0) return
-    pointer.current = { id: event.pointerId, x: event.clientX, y: event.clientY }
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }
-
-  function endSwipe(event: PointerEvent<HTMLDivElement>) {
-    const start = pointer.current
-    if (!start || start.id !== event.pointerId) return
-    pointer.current = undefined
-    const x = event.clientX - start.x
-    const y = event.clientY - start.y
-    if (Math.abs(x) >= swipeDistance && Math.abs(x) > Math.abs(y)) goTo(index - Math.sign(x))
-  }
+export function Popular({ query, ...actions }: Props) {
+  const [view, setView] = useState(() => readPopularLocation(query))
 
   return (
     <div className="popular-page">
       <header className="popular-header">
-        <Link className="text-action" to="/" aria-label="Back to Dashboard"><ArrowLeftIcon size={18} /> Dashboard</Link>
+        <Link className="text-action" to="/" aria-label="Back to Dashboard"><ArrowLeftIcon size={iconSize.sm} /> Dashboard</Link>
         <h1 tabIndex={-1}>{popularTitle}</h1>
-        <CategoryPicker value={category} onChange={selectCategory} label={popularTitle + ' categories'} />
+        <CategoryPicker value={view.category} options={categories} label={popularTitle + ' categories'} onChange={(category) => {
+          if (category !== view.category) setView({ category, title: null })
+        }} />
       </header>
-      <PopularFeedback {...feed} />
+      <PopularCarousel key={view.category} {...view} {...actions} />
+    </div>
+  )
+}
+
+function PopularCarousel({ category, title, entries, onLog, onPreference }: ReturnType<typeof readPopularLocation> & Omit<Props, 'query'>) {
+  const [selection, setSelection] = useState({ key: title ?? undefined, waiting: false })
+  const prefetchedFrom = useRef<string | undefined>(undefined)
+  const animate = useMotionEnabled()
+  const feed = usePopularTitles(category)
+  const { items, loading, loadingMore, canLoadMore, loadMore } = feed
+  const selectedIndex = items.findIndex((media) => mediaKey(media) === selection.key)
+  const index = Math.max(0, selectedIndex)
+  const media = selection.key && selectedIndex < 0 && loading ? undefined : items[index]
+  const key = media ? mediaKey(media) : undefined
+  const next = items[index + 1]
+  const entry = media ? entries.get(media.id) ?? [...entries.values()].find((entry) => mediaKey(entry.media) === key) : undefined
+
+  if (selection.waiting && next) {
+    setSelection({ key: mediaKey(next), waiting: false })
+  }
+
+  useEffect(() => {
+    if (!canLoadMore) return
+    if (!items.length || selection.waiting) {
+      loadMore()
+    } else if (key && items.length - index <= prefetchDistance && prefetchedFrom.current !== key) {
+      prefetchedFrom.current = key
+      loadMore()
+    }
+  }, [canLoadMore, index, items.length, key, loadMore, selection.waiting])
+
+  function step(direction: -1 | 1) {
+    const target = items[index + direction]
+    if (target) {
+      setSelection({ key: mediaKey(target), waiting: false })
+      return true
+    }
+    if (direction === 1 && (canLoadMore || loading)) setSelection({ key, waiting: true })
+    return false
+  }
+
+  return (
+    <>
+      {!loadingMore ? <PopularFeedback {...feed} /> : null}
       {media ? (
         <section className="popular-carousel" aria-label="Popular titles" aria-roledescription="carousel">
           <div className="popular-film-heading">
-            <h2><DetailLink id={detailTriggerId} media={entry?.media ?? media}>{media.title}</DetailLink></h2>
+            <h2><DetailLink id={popularPosterId(media)} media={entry?.media ?? media}>{media.title}</DetailLink></h2>
             <p>{[media.year, formatLabel(media)].filter(Boolean).join(' · ')}</p>
           </div>
-          <span className="sr-only" aria-live="polite" aria-atomic="true">{media.title}, title {index + 1} of {items.length}</span>
-          <div
-            className="popular-stage" role="group" tabIndex={0} aria-label="Poster. Swipe or use the left and right arrow keys to browse."
-            onPointerDown={beginSwipe} onPointerUp={endSwipe} onPointerCancel={() => { pointer.current = undefined }}
-            onKeyDown={(event) => {
-              if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-                event.preventDefault()
-                goTo(index + (event.key === 'ArrowRight' ? 1 : -1))
-              }
-            }}
-          >
-            <div className="popular-peek popular-peek-before" aria-hidden="true">{previous ? <Poster key={mediaKey(previous)} media={previous} eager /> : null}</div>
-            <motion.div className="popular-cover" key={key} variants={slide} custom={selection.direction} initial={animate ? 'hidden' : false} animate="visible">
-              <Poster media={media} sharedId={detailTriggerId} eager />
-            </motion.div>
-            <div className="popular-peek popular-peek-after" aria-hidden="true">{next ? <Poster key={mediaKey(next)} media={next} eager /> : null}</div>
-          </div>
-          <div className="popular-title-controls" role="group" aria-label="Browse titles">
-            <button className="icon-button" type="button" aria-label="Previous title" aria-disabled={!previous} onClick={() => goTo(index - 1)}><CaretLeftIcon size={19} /></button>
-            <motion.span key={index} variants={rise} initial={animate ? 'hidden' : false} animate="visible" aria-hidden="true">{index + 1} / {items.length}</motion.span>
-            <button className="icon-button" type="button" aria-label="Next title" aria-disabled={!next} onClick={() => goTo(index + 1)}><CaretRightIcon size={19} /></button>
-          </div>
+          <span className="sr-only" aria-live="polite" aria-atomic="true">{media.title}, title {index + 1}</span>
+          <SwipePosters items={items} index={index} onStep={step} />
           <PopularActions
             key={key} media={media} entry={entry} onLog={onLog} onPreference={onPreference}
-            onInteract={() => setSelection((current) => ({ ...current, key: mediaKey(media) }))}
+            onInteract={() => setSelection({ key, waiting: false })}
           />
-          {lastPage > 1 ? (
-            <nav className="popular-pagination" aria-label="Popular pages">
-              <button className="text-action" type="button" aria-label="Previous page" aria-disabled={page === 1} onClick={() => { if (page > 1) goTo((page - 2) * popularPageSize) }}><CaretLeftIcon size={16} /> Previous</button>
-              <span aria-live="polite">Page {page} of {lastPage}</span>
-              <button className="text-action" type="button" aria-label="Next page" aria-disabled={page === lastPage} onClick={() => goTo(page * popularPageSize)}>Next <CaretRightIcon size={16} /></button>
-            </nav>
-          ) : null}
+          {loadingMore && !next ? <p className="popular-feed-status" role="status">Loading more titles…</p> : null}
+          {!next && !loading && !canLoadMore && !feed.retry && !feed.visible.some(([, shelf]) => shelf.status === 'offline' || shelf.status === 'stale')
+            ? <p className="popular-feed-status">You’ve reached the end.</p> : null}
         </section>
-      ) : loading ? (
+      ) : loading || canLoadMore ? (
         <div className="popular-skeleton" aria-hidden="true"><div className="poster-art" data-loading /></div>
       ) : (
         <motion.div className="empty-state" variants={rise} initial={animate ? 'hidden' : false} animate="visible">
@@ -127,6 +107,6 @@ export function Popular({ entries, query, onLog, onPreference }: Props) {
           <Link className="text-action" to="/search">Search catalog</Link>
         </motion.div>
       )}
-    </div>
+    </>
   )
 }

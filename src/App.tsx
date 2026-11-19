@@ -3,7 +3,7 @@ import { AnimatePresence, LayoutGroup, motion, MotionConfig } from 'motion/react
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, matchPath, NavLink, useLocation, useNavigate } from 'react-router'
 import { demoById } from './data/demo'
-import { mediaKey } from './domain/catalog'
+import { discoverSections, mediaKey } from './domain/catalog'
 import { parseCatalogKey } from './domain/identity'
 import { peekPreview } from './data/catalog-client'
 import { useCatalogDetail, useConnection, demoMode } from './data/useCatalog'
@@ -24,6 +24,7 @@ import { CatalogFeedback, catalogMessage, CatalogSkeleton, offlineCacheError } f
 import { LogDialog } from './ui/LogDialog'
 import type { LogSession } from './ui/LogDialog'
 import { crossfade, motionProperties, rise, useMotionEnabled } from './ui/motion'
+import { iconSize } from './ui/tokens'
 
 const InstallStatus = lazy(() => import('./ui/InstallStatus'))
 
@@ -90,6 +91,7 @@ export function App() {
   const browseParams = new URLSearchParams(query)
   const rawStatus = browseParams.get('status')
   const defaultStatus = rawStatus === 'Watchlist' ? rawStatus : statuses.find((status) => status === rawStatus) ?? null
+  const defaultCategory = discoverSections.find((section) => section === browseParams.get('category'))
 
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -188,18 +190,18 @@ export function App() {
       <div className="app-shell" style={motionProperties} data-motion={animate ? 'full' : 'reduced'} data-popular-view={path === '/popular' && !detailId || undefined}>
         <a href="#main-content" className="skip-link">Skip to content</a>
         <aside className="sidebar">
-          <Link to="/" className="wordmark"><LogoMark size={34} /> Epilog</Link>
+          <Link to="/" className="wordmark"><LogoMark size={iconSize.display} /> Epilog</Link>
           <nav aria-label="Primary">
             {navigation.map(({ to, label, Icon }) => (
-              <NavLink key={to} to={to} end className={linkProps}><Icon size={21} /> {label}</NavLink>
+              <NavLink key={to} to={to} end className={linkProps}><Icon size={iconSize.lg} /> {label}</NavLink>
             ))}
           </nav>
         </aside>
         <header className="mobile-header">
-          <Link to="/" className="wordmark"><LogoMark size={30} /> Epilog</Link>
+          <Link to="/" className="wordmark"><LogoMark size={iconSize.display} /> Epilog</Link>
           <div>
-            <NavLink to="/search" className="icon-button" aria-label="Search"><MagnifyingGlassIcon size={22} /></NavLink>
-            <NavLink to="/settings" className="icon-button" aria-label="Settings"><GearSixIcon size={22} /></NavLink>
+            <NavLink to="/search" className="icon-button" aria-label="Search"><MagnifyingGlassIcon size={iconSize.lg} /></NavLink>
+            <NavLink to="/settings" className="icon-button" aria-label="Settings"><GearSixIcon size={iconSize.lg} /></NavLink>
           </div>
         </header>
         <main id="main-content" className="main-content" tabIndex={-1} ref={main}>
@@ -222,7 +224,7 @@ export function App() {
                 animate="visible"
               >
                 {path === '/' ? <Dashboard entries={entries} onLog={openLog} />
-                  : path === '/library' ? <Library entries={entries} defaultStatus={defaultStatus} highlightId={highlightId} />
+                  : path === '/library' ? <Library entries={entries} defaultStatus={defaultStatus} defaultCategory={defaultCategory} highlightId={highlightId} />
                   : path === '/popular' ? <Popular entries={entries} query={query ?? ''} onLog={openLog} onPreference={savePreference} />
                   : path === '/search' ? <Search entries={entries} onLog={(media, trigger) => openLog(media, trigger, browseParams.get('action') === 'watch' ? 'Completed' : undefined)} />
                   : path === '/settings' ? <Settings theme={theme} onTheme={changeTheme} storageError={storageError} onRestore={(count) => announce(count ? 'Backup restored.' : 'Backup reviewed. Your library is already up to date.')} />
@@ -251,7 +253,7 @@ export function App() {
         </main>
         <nav className="mobile-nav" aria-label="Primary">
           {navigation.filter(({ mobile }) => mobile).map(({ to, label, Icon }) => (
-            <NavLink key={to} to={to} end className={linkProps}><Icon size={22} /> {label}</NavLink>
+            <NavLink key={to} to={to} end className={linkProps}><Icon size={iconSize.lg} /> {label}</NavLink>
           ))}
         </nav>
         {import.meta.env.PROD ? <Suspense fallback={null}><InstallStatus /></Suspense> : null}
