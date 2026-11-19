@@ -10,6 +10,7 @@ import { CategoryPicker } from '../ui/CategoryPicker'
 import { PosterGrid } from '../ui/MediaCards'
 import { rise, useMotionEnabled } from '../ui/motion'
 import { SearchField } from '../ui/SearchField'
+import { iconSize } from '../ui/tokens'
 
 export function Library({ entries, defaultStatus, defaultCategory, highlightId }: {
   entries: ReadonlyMap<string, LibraryEntry>
@@ -48,7 +49,7 @@ export function Library({ entries, defaultStatus, defaultCategory, highlightId }
     <>
       <header className="page-intro">
         <div><h1 tabIndex={-1}>Library</h1><p>Everything you watch and play, in one place.</p></div>
-        <Link to="/search?action=watch" className="button button-primary"><EyeIcon size={20} weight="bold" /> Watch</Link>
+        <Link to="/search?action=watch" className="button button-primary"><EyeIcon size={iconSize.md} weight="bold" /> Watch</Link>
       </header>
       <section aria-label="Saved titles">
         <div className="library-tabs">
@@ -98,7 +99,7 @@ export function Library({ entries, defaultStatus, defaultCategory, highlightId }
         <PosterGrid items={visible.map(({ media }) => media)} entries={entries} shelf="Library titles" highlightId={highlightId} />
         {!visible.length ? (
           <motion.div className="empty-state" variants={rise} initial={animate ? 'hidden' : false} animate="visible">
-            <BooksIcon size={32} weight="light" />
+            <BooksIcon size={iconSize.display} weight="light" />
             <h2>{entries.size ? 'No matching titles' : 'Your library is empty'}</h2>
             <p>{entries.size ? 'Try adjusting your search or filters.' : 'Log something you’ve watched or played to get started.'}</p>
             {entries.size

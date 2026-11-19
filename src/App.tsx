@@ -24,6 +24,7 @@ import { CatalogFeedback, catalogMessage, CatalogSkeleton, offlineCacheError } f
 import { LogDialog } from './ui/LogDialog'
 import type { LogSession } from './ui/LogDialog'
 import { crossfade, motionProperties, rise, useMotionEnabled } from './ui/motion'
+import { iconSize } from './ui/tokens'
 
 const InstallStatus = lazy(() => import('./ui/InstallStatus'))
 
@@ -189,18 +190,18 @@ export function App() {
       <div className="app-shell" style={motionProperties} data-motion={animate ? 'full' : 'reduced'} data-popular-view={path === '/popular' && !detailId || undefined}>
         <a href="#main-content" className="skip-link">Skip to content</a>
         <aside className="sidebar">
-          <Link to="/" className="wordmark"><LogoMark size={34} /> Epilog</Link>
+          <Link to="/" className="wordmark"><LogoMark size={iconSize.display} /> Epilog</Link>
           <nav aria-label="Primary">
             {navigation.map(({ to, label, Icon }) => (
-              <NavLink key={to} to={to} end className={linkProps}><Icon size={21} /> {label}</NavLink>
+              <NavLink key={to} to={to} end className={linkProps}><Icon size={iconSize.lg} /> {label}</NavLink>
             ))}
           </nav>
         </aside>
         <header className="mobile-header">
-          <Link to="/" className="wordmark"><LogoMark size={30} /> Epilog</Link>
+          <Link to="/" className="wordmark"><LogoMark size={iconSize.display} /> Epilog</Link>
           <div>
-            <NavLink to="/search" className="icon-button" aria-label="Search"><MagnifyingGlassIcon size={22} /></NavLink>
-            <NavLink to="/settings" className="icon-button" aria-label="Settings"><GearSixIcon size={22} /></NavLink>
+            <NavLink to="/search" className="icon-button" aria-label="Search"><MagnifyingGlassIcon size={iconSize.lg} /></NavLink>
+            <NavLink to="/settings" className="icon-button" aria-label="Settings"><GearSixIcon size={iconSize.lg} /></NavLink>
           </div>
         </header>
         <main id="main-content" className="main-content" tabIndex={-1} ref={main}>
@@ -252,7 +253,7 @@ export function App() {
         </main>
         <nav className="mobile-nav" aria-label="Primary">
           {navigation.filter(({ mobile }) => mobile).map(({ to, label, Icon }) => (
-            <NavLink key={to} to={to} end className={linkProps}><Icon size={22} /> {label}</NavLink>
+            <NavLink key={to} to={to} end className={linkProps}><Icon size={iconSize.lg} /> {label}</NavLink>
           ))}
         </nav>
         {import.meta.env.PROD ? <Suspense fallback={null}><InstallStatus /></Suspense> : null}

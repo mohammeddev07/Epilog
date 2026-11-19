@@ -1,4 +1,5 @@
 import '@fontsource-variable/schibsted-grotesk/wght.css'
+import './ui/tokens.css'
 import './ui/styles.css'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'

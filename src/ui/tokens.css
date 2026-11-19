@@ -1,0 +1,173 @@
+/*
+ * Epilog design tokens — the single source of truth for visual values.
+ *
+ * Rules
+ * - Components use semantic tokens (--text, --surface, --accent…), never primitives.
+ * - Primitives (--paper-*, --night-*, --violet-*…) exist only to feed semantic tokens.
+ * - Spacing is a 4px grid (--space-N = N × 4px). Fluid tokens clamp between grid steps.
+ * - New UI should compose these; if a value is missing, add a token here, don't inline it.
+ *
+ * Rationale
+ * - Colors are the existing brand palette (warm paper / cool night, violet accent), lifted into
+ *   primitives. --success is new and AA-checked (6.4:1 light, 9.8:1 dark on --surface).
+ * - Type scale: the 18 sizes in use collapsed to their clusters (12/13/14/16px + fluid headings).
+ * - Weights: Schibsted Grotesk is variable; the 13 weights in use clustered into 5 steps.
+ * - Radii: kept the three established steps (rounded to 8/14/20px) plus 6px for thumbnails.
+ * - Control heights: 44px (WCAG 2.5.5 touch target) and 56px for prominent controls.
+ *
+ * Breakpoints (CSS custom properties can't be used in @media; keep these in sync by hand)
+ *   --bp-wide    75em  (1200px)  poster grid switches from 6 fixed columns to auto-fill
+ *   --bp-tablet  56em  (896px)   sidebar → mobile header + bottom nav
+ *   --bp-phone   38em  (608px)   single-column detail, bottom-sheet dialogs
+ *
+ * Motion durations and easing live in ./motion.ts (JS animations need them as numbers) and reach
+ * CSS as --motion-* custom properties on .app-shell.
+ *
+ * Icon sizes live in ./tokens.ts (Phosphor takes a numeric size prop).
+ *
+ * Shared building blocks (styles.css)
+ * - Buttons: .button + .button-primary | .button-secondary | .button-danger; .icon-button; .text-action.
+ *   Disable with the `disabled` attribute; put aria-busy on the region while saving (progress cursor).
+ * - Surfaces: .panel (bordered card) and .panel-inset (nested, on --bg).
+ * - Form controls: .control for inputs/selects; .field wraps a label + control; .form-error for messages.
+ * - Modals: <dialog className="sheet"> + <SheetHeader> (./Sheet.tsx) inside .sheet-body; bottom sheet on phones.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* ---- Primitives ---- */
+  --white: #fff;
+  --paper-0: #fffefa;
+  --paper-50: #f8f7f3;
+  --paper-100: #eeeae2;
+  --paper-150: #e8e4db;
+  --paper-200: #dedbd2;
+  --paper-500: #898578;
+  --paper-700: #616057;
+  --paper-900: #202019;
+  --night-50: #f3f1e9;
+  --night-300: #b9bbc5;
+  --night-500: #737688;
+  --night-700: #3b3d48;
+  --night-750: #333541;
+  --night-800: #2d313c;
+  --night-850: #1e2028;
+  --night-900: #1b1f2e;
+  --night-950: #15161b;
+  --night-990: #10131b;
+  --violet-50: #f2eafb;
+  --violet-300: #c9a6f2;
+  --violet-700: #6a2ea0;
+  --violet-800: #4a1f73;
+  --violet-900: #3b2a57;
+  --violet-950: #2a1245;
+  --red-300: #ffabaa;
+  --red-700: #9f292a;
+  --green-300: #9fd6aa;
+  --green-700: #2b6a3c;
+
+  /* ---- Semantic colors ---- */
+  --bg: light-dark(var(--paper-50), var(--night-950));
+  --surface: light-dark(var(--paper-0), var(--night-850));
+  --hover: light-dark(var(--paper-100), var(--night-800));
+  --text: light-dark(var(--paper-900), var(--night-50));
+  --muted: light-dark(var(--paper-700), var(--night-300));
+  --line: light-dark(var(--paper-150), var(--night-750));
+  --edge: light-dark(var(--paper-200), var(--night-700));
+  --control-edge: light-dark(var(--paper-500), var(--night-500));
+  --accent: light-dark(var(--violet-700), var(--violet-300));
+  --accent-soft: light-dark(var(--violet-50), var(--violet-900));
+  --on-accent: light-dark(var(--white), var(--violet-950));
+  --focus: var(--accent);
+  --danger: light-dark(var(--red-700), var(--red-300));
+  --success: light-dark(var(--green-700), var(--green-300));
+  /* Controls drawn on top of poster art: same in both themes because the art is. */
+  --overlay: var(--night-900);
+  --on-overlay: var(--white);
+  --overlay-halo: var(--violet-800);
+  --backdrop: color-mix(in srgb, var(--night-990) 62%, transparent);
+  --shimmer: light-dark(rgb(251 250 247 / 63%), rgb(255 255 255 / 9%));
+
+  /* ---- Typography ---- */
+  --font-sans: 'Schibsted Grotesk Variable', system-ui, sans-serif;
+  --font-brand: ui-rounded, 'SF Pro Rounded', var(--font-sans);
+  --text-2xs: 0.75rem;   /* 12px — badges, compact labels */
+  --text-xs: 0.8125rem;  /* 13px — metadata */
+  --text-sm: 0.875rem;   /* 14px — secondary text, nav, chips */
+  --text-md: 1rem;       /* 16px — body */
+  --text-lead: clamp(1rem, 1.5vw, 1.125rem);
+  --text-brand: 1.75rem;
+  --text-stat: clamp(1.5rem, 4vw, 2.5rem);
+  --text-h2: clamp(1.375rem, 2.6vw, 2rem);
+  --text-display-sm: clamp(1.625rem, 3.75vw, 2.75rem);
+  --text-h1: clamp(2.375rem, 5vw, 4.5rem);
+  --weight-regular: 400;
+  --weight-medium: 600;
+  --weight-semibold: 680;
+  --weight-bold: 720;
+  --weight-black: 800;
+  --leading-none: 1;
+  --leading-tight: 1.05;
+  --leading-snug: 1.2;
+  --leading-normal: 1.6;
+  --tracking-display: -0.07em;
+  --tracking-heading: -0.05em;
+  --tracking-snug: -0.035em;
+  --tracking-tight: -0.02em;
+  --underline-offset: 0.2em;
+
+  /* ---- Spacing (4px grid) ---- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 1.75rem;
+  --space-8: 2rem;
+  --space-9: 2.25rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  --page-gutter: clamp(var(--space-4), 4vw, var(--space-16));
+  --space-page-top: clamp(var(--space-10), 6vw, 5.5rem);
+  --space-section: clamp(var(--space-7), 4vw, var(--space-12));
+  --space-grid: clamp(var(--space-4), 2vw, var(--space-7));
+
+  /* ---- Sizing ---- */
+  --size-control: 2.75rem;    /* 44px minimum touch target */
+  --size-control-lg: 3.5rem;  /* 56px */
+  --size-thumb: 2.75rem;      /* poster thumbnail width */
+  --size-checkbox: 1rem;
+  --size-sidebar: 13.25rem;
+  --size-dock: 4.5rem;        /* mobile bottom nav + gap; fixed UI sits above it */
+
+  /* ---- Shape ---- */
+  --radius-xs: 0.375rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.875rem;
+  --radius-lg: 1.25rem;
+  --radius-full: 999px;
+  --border-width: 1px;
+  --border-width-thick: 2px;
+  --focus-width: 3px;
+  --focus-offset: 4px;
+
+  /* ---- Elevation ---- */
+  --shadow-sm: 0 2px 8px rgb(5 8 19 / 22%);
+  --shadow-md: 0 8px 24px light-dark(rgb(46 36 15 / 9%), rgb(0 0 0 / 33%));
+  --z-below: -1;
+  --z-raised: 1;
+  --z-dock: 10;
+  --z-toast: 20;
+  --z-banner: 30;
+  --z-skip: 40;
+
+  /* ---- State ---- */
+  --opacity-disabled: 0.7;
+  --hover-lift: -3px;
+  --press-scale: 0.96;
+  --press-scale-subtle: 0.98;
+}
+:root[data-theme='light'] { color-scheme: light; }
+:root[data-theme='dark'] { color-scheme: dark; }

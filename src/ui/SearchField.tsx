@@ -1,5 +1,6 @@
 import { MagnifyingGlassIcon, XIcon } from '@phosphor-icons/react'
 import { useRef } from 'react'
+import { iconSize } from './tokens'
 
 interface Props {
   id?: string
@@ -16,7 +17,7 @@ export function SearchField({ id, className, label, placeholder, value, maxLengt
 
   return (
     <div className={className ? `search-field ${className}` : 'search-field'}>
-      <MagnifyingGlassIcon size={20} aria-hidden="true" />
+      <MagnifyingGlassIcon size={iconSize.md} aria-hidden="true" />
       <input
         ref={input} id={id} type="search" aria-label={label} placeholder={placeholder}
         value={value} maxLength={maxLength} onChange={(event) => onChange(event.target.value)}
@@ -26,7 +27,7 @@ export function SearchField({ id, className, label, placeholder, value, maxLengt
           onChange('')
           input.current?.focus({ preventScroll: true })
         }}>
-          <XIcon size={18} aria-hidden="true" />
+          <XIcon size={iconSize.sm} aria-hidden="true" />
         </button>
       ) : null}
     </div>

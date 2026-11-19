@@ -10,6 +10,7 @@ import { CategoryPicker } from '../ui/CategoryPicker'
 import { PosterGrid, ProgressList } from '../ui/MediaCards'
 import type { OpenLog } from '../ui/MediaCards'
 import { popularPath } from '../ui/popular-navigation'
+import { iconSize } from '../ui/tokens'
 
 export function Dashboard({ entries, onLog }: {
   entries: ReadonlyMap<string, LibraryEntry>
@@ -29,7 +30,7 @@ export function Dashboard({ entries, onLog }: {
           <h1 tabIndex={-1}>Dashboard</h1>
           <p>{entries.size ? 'Pick up where you left off.' : 'Start your library with something you’ve watched or played.'}</p>
         </div>
-        <Link to="/search?action=watch" className="button button-primary"><EyeIcon size={20} weight="bold" /> Watch</Link>
+        <Link to="/search?action=watch" className="button button-primary"><EyeIcon size={iconSize.md} weight="bold" /> Watch</Link>
       </header>
 
       {inProgress.length ? (
@@ -40,23 +41,23 @@ export function Dashboard({ entries, onLog }: {
       ) : null}
       {planned.length ? (
         <section className="shelf" aria-labelledby="backlog-heading">
-          <div className="shelf-heading"><h2 id="backlog-heading">Up next</h2><Link to={'/library?' + new URLSearchParams({ status: 'Watchlist', category: primaryCategory(planned[0].media) })} className="text-action">View backlog <ArrowRightIcon size={17} /></Link></div>
+          <div className="shelf-heading"><h2 id="backlog-heading">Up next</h2><Link to={'/library?' + new URLSearchParams({ status: 'Watchlist', category: primaryCategory(planned[0].media) })} className="text-action">View backlog <ArrowRightIcon size={iconSize.sm} /></Link></div>
           <ProgressList entries={planned} label="Backlog" />
         </section>
       ) : null}
 
       {!entries.size ? (
         <Link className="search-prompt" to="/search">
-          <MagnifyingGlassIcon size={23} />
+          <MagnifyingGlassIcon size={iconSize.xl} />
           <span>Search movies, TV, anime, and games</span>
-          <ArrowRightIcon size={20} />
+          <ArrowRightIcon size={iconSize.md} />
         </Link>
       ) : null}
 
       <section className="shelf" aria-labelledby="popular-heading">
         <div className="shelf-heading discover-heading">
           <h2 id="popular-heading">{popularTitle}</h2>
-          <Link to={popularPath(category)} className="text-action">Browse popular titles <ArrowRightIcon size={17} /></Link>
+          <Link to={popularPath(category)} className="text-action">Browse popular titles <ArrowRightIcon size={iconSize.sm} /></Link>
         </div>
         <CategoryPicker value={category} options={categories} onChange={setCategory} label={popularTitle + ' categories'} />
         <PopularFeedback {...feed} />
@@ -67,7 +68,7 @@ export function Dashboard({ entries, onLog }: {
 
       {recent.length ? (
         <section className="shelf" aria-labelledby="recent-heading">
-          <div className="shelf-heading"><h2 id="recent-heading">Recently logged</h2><Link to="/library" className="text-action">View library <ArrowRightIcon size={17} /></Link></div>
+          <div className="shelf-heading"><h2 id="recent-heading">Recently logged</h2><Link to="/library" className="text-action">View library <ArrowRightIcon size={iconSize.sm} /></Link></div>
           <ProgressList entries={recent.slice(0, 3)} label="Recently logged" />
         </section>
       ) : null}

@@ -15,6 +15,7 @@ import { PopularActions } from '../ui/PopularActions'
 import type { SavePreference } from '../ui/PopularActions'
 import { readPopularLocation } from '../ui/popular-navigation'
 import { popularPosterId, SwipePosters } from '../ui/SwipePosters'
+import { iconSize } from '../ui/tokens'
 
 const prefetchDistance = 3
 
@@ -31,7 +32,7 @@ export function Popular({ query, ...actions }: Props) {
   return (
     <div className="popular-page">
       <header className="popular-header">
-        <Link className="text-action" to="/" aria-label="Back to Dashboard"><ArrowLeftIcon size={18} /> Dashboard</Link>
+        <Link className="text-action" to="/" aria-label="Back to Dashboard"><ArrowLeftIcon size={iconSize.sm} /> Dashboard</Link>
         <h1 tabIndex={-1}>{popularTitle}</h1>
         <CategoryPicker value={view.category} options={categories} label={popularTitle + ' categories'} onChange={(category) => {
           if (category !== view.category) setView({ category, title: null })

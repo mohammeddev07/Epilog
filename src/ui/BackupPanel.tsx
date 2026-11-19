@@ -5,6 +5,7 @@ import { library } from '../data/library'
 import { backupFileName, backupSizeLimit } from '../domain/backup'
 import type { RestorePreview } from '../domain/backup'
 import { rise, useMotionEnabled } from './motion'
+import { iconSize } from './tokens'
 
 export function BackupPanel({ onRestore }: { onRestore: (count: number) => void }) {
   const [preview, setPreview] = useState<RestorePreview>()
@@ -65,12 +66,12 @@ export function BackupPanel({ onRestore }: { onRestore: (count: number) => void 
   }
 
   return (
-    <section aria-labelledby="backup-heading" className="settings-panel backup-panel">
+    <section aria-labelledby="backup-heading" className="settings-panel backup-panel" aria-busy={busy}>
       <h2 id="backup-heading">Backup and restore</h2>
       <p className="muted">Export your tracking history, likes, ratings, and watchlist to move your library to another browser. Catalog art and provider metadata stay out of the backup.</p>
       <div className="action-row">
         <button type="button" className="button button-secondary" disabled={busy} onClick={download}>
-          <DownloadSimpleIcon size={19} /> Export backup
+          <DownloadSimpleIcon size={iconSize.md} /> Export backup
         </button>
         <input
           className="sr-only"
@@ -85,7 +86,7 @@ export function BackupPanel({ onRestore }: { onRestore: (count: number) => void 
           }}
         />
         <button type="button" className="button button-secondary" disabled={busy} ref={chooseFile} onClick={() => filePicker.current?.click()}>
-          <UploadSimpleIcon size={19} /> Choose backup file
+          <UploadSimpleIcon size={iconSize.md} /> Choose backup file
         </button>
       </div>
       {error ? (

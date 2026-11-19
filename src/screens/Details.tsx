@@ -9,6 +9,7 @@ import type { SetEpisode } from '../ui/EpisodeTracker'
 import { Poster } from '../ui/MediaCards'
 import type { OpenLog } from '../ui/MediaCards'
 import { rise, useMotionEnabled } from '../ui/motion'
+import { iconSize } from '../ui/tokens'
 
 interface Props {
   media: Media
@@ -28,9 +29,9 @@ export function Details({ media, entry, back, triggerId, onLog, onEpisode, onRem
   return (
     <article className="title-detail">
       {back ? (
-        <button type="button" className="text-action back-link" onClick={back}><ArrowLeftIcon size={18} /> Back</button>
+        <button type="button" className="text-action back-link" onClick={back}><ArrowLeftIcon size={iconSize.sm} /> Back</button>
       ) : (
-        <Link className="text-action back-link" to="/library"><ArrowLeftIcon size={18} /> Library</Link>
+        <Link className="text-action back-link" to="/library"><ArrowLeftIcon size={iconSize.sm} /> Library</Link>
       )}
       <div className="detail-header">
         <Poster media={media} sharedId={triggerId} eager />
@@ -51,7 +52,7 @@ export function Details({ media, entry, back, triggerId, onLog, onEpisode, onRem
             </div>
           ) : null}
           <button type="button" className="button button-primary" onClick={(event) => onLog(media, event.currentTarget, entry?.status ?? 'Completed')}>
-            <TrackingIcon size={20} weight={entry?.status === 'Completed' ? 'fill' : 'regular'} />
+            <TrackingIcon size={iconSize.md} weight={entry?.status === 'Completed' ? 'fill' : 'regular'} />
             {trackingAction(media, entry)}
           </button>
         </div>
@@ -96,7 +97,7 @@ function RemoveEntry({ onRemove }: { onRemove: () => Promise<void> }) {
   }
 
   return (
-    <section className="shelf detail-section">
+    <section className="shelf detail-section" aria-busy={busy}>
       <button type="button" className="text-action danger-action" ref={trigger} aria-expanded={confirm} aria-controls="remove-entry" onClick={() => setConfirm(!confirm)} disabled={busy}>
         Remove from library
       </button>

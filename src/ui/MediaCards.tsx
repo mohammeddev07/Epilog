@@ -8,6 +8,7 @@ import { formatLabel, progressText } from '../domain/media'
 import type { LibraryEntry, Media, Status } from '../domain/media'
 import { titlePath, useOpenDetail } from './detail-navigation'
 import { layoutSpring, rise, useMotionEnabled } from './motion'
+import { iconSize } from './tokens'
 
 export type OpenLog = (media: Media, trigger: HTMLElement, initialStatus?: Status) => void
 
@@ -34,7 +35,7 @@ export function Poster({ media, sharedId, eager = false }: { media: Media; share
           onError={() => setFailedSource(media.poster)}
         />
       ) : (
-        <span className="poster-placeholder" aria-hidden="true"><Fallback size={38} weight="thin" /></span>
+        <span className="poster-placeholder" aria-hidden="true"><Fallback size={iconSize.poster} weight="thin" /></span>
       )}
     </motion.div>
   )
@@ -131,7 +132,7 @@ export function PosterGrid({ items, entries, shelf, onLog, titleLink, highlightI
                     animate="visible"
                     aria-hidden="true"
                   >
-                    {entry ? <CheckIcon size={21} weight="bold" /> : <PlusIcon size={21} weight="bold" />}
+                    {entry ? <CheckIcon size={iconSize.lg} weight="bold" /> : <PlusIcon size={iconSize.lg} weight="bold" />}
                   </motion.span>
                 </button>
               ) : null}
