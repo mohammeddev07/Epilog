@@ -2,7 +2,7 @@ import { ArrowLeftIcon, PencilSimpleIcon, PlusIcon } from '@phosphor-icons/react
 import { motion } from 'motion/react'
 import { useRef, useState } from 'react'
 import { Link } from 'react-router'
-import { displayDate, formatLabel, progressText } from '../domain/media'
+import { displayDate, formatLabel, isWatchlisted, progressText } from '../domain/media'
 import type { LibraryEntry, Media } from '../domain/media'
 import { EpisodeTracker } from '../ui/EpisodeTracker'
 import type { SetEpisode } from '../ui/EpisodeTracker'
@@ -40,10 +40,13 @@ export function Details({ media, entry, back, triggerId, onLog, onEpisode, onRem
           {media.genres.length ? <ul className="genres" aria-label="Genres">{media.genres.map((genre) => <li key={genre}>{genre}</li>)}</ul> : null}
           {entry ? (
             <div className="detail-status">
-              <motion.span key={entry.status} className="status-label" data-status={entry.status} initial={animate ? 'hidden' : false} animate="visible" variants={rise}>{entry.status}</motion.span>
-              {progressText(entry) !== entry.status ? (
+              {entry.status ? <motion.span key={entry.status} className="status-label" data-status={entry.status} initial={animate ? 'hidden' : false} animate="visible" variants={rise}>{entry.status}</motion.span> : null}
+              {progressText(entry) !== (entry.status ?? 'Saved') ? (
                 <motion.span className="muted" key={progressText(entry)} initial={animate ? 'hidden' : false} animate="visible" variants={rise}>{progressText(entry)}</motion.span>
               ) : null}
+              {entry.liked ? <span className="status-label">Liked</span> : null}
+              {entry.rating ? <span className="status-label">Rated {entry.rating}/5</span> : null}
+              {isWatchlisted(entry) ? <span className="status-label">Watchlist</span> : null}
             </div>
           ) : null}
           <button type="button" className="button button-primary" onClick={(event) => onLog(media, event.currentTarget)}>

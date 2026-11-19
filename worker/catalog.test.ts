@@ -89,7 +89,7 @@ describe('catalog Worker', () => {
   it('returns unambiguous specials and omits totals while a series is airing', async () => {
     const upstream = vi.fn<typeof fetch>(async (input) => String(input).includes('/season/')
       ? Response.json({ episodes: [
-        { id: 99, name: 'Mini episode', season_number: 0, episode_number: 1 },
+        { id: 99, name: 'Mini episode', season_number: 0, episode_number: 1, air_date: '2026-10-05' },
         { id: 100, season_number: 0, episode_number: 2 },
         { id: 101, season_number: 0, episode_number: 2 },
         { id: 102, season_number: 2, episode_number: 1 },
@@ -101,7 +101,7 @@ describe('catalog Worker', () => {
     expect(body).toMatchObject({ items: [{ id: 'tmdb:tv:15', seasons: [{ number: 0, episodeCount: 2 }] }] })
     expect(body.items[0]).not.toHaveProperty('episodeTotal')
     const season = await worker.fetch(new Request(`${origin}/api/catalog/season/tmdb%3Atv%3A15/0`), env)
-    expect(await season.json()).toEqual({ episodes: [{ season: 0, number: 1, title: 'Mini episode', externalId: '99' }] })
+    expect(await season.json()).toEqual({ episodes: [{ season: 0, number: 1, title: 'Mini episode', externalId: '99', airDate: '2026-10-05' }] })
   })
 
   it('keeps the provider’s game popularity ordering and caches the public shelf', async () => {
@@ -117,5 +117,20 @@ describe('catalog Worker', () => {
     expect(initial).toMatchObject({ items: [{ title: 'First' }, { title: 'Second' }] })
     expect(await (await worker.fetch(request, env)).json()).toEqual(initial)
     expect(upstream).toHaveBeenCalledTimes(3)
+  })
+
+  it('collects both weekly trending pages in provider order and bounds the combined shelf', async () => {
+    const upstream = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input))
+      expect(url.pathname).toBe('/3/trending/movie/week')
+      const page = Number(url.searchParams.get('page'))
+      const first = page === 1 ? 1 : 20
+      return Response.json({ results: Array.from({ length: 20 }, (_, index) => ({ id: index + first, title: 'Film ' + (index + first) })) })
+    })
+    const worker = createCatalogWorker(upstream)
+    const response = await worker.fetch(new Request(`${origin}/api/catalog/popular/movies`), env)
+    const body = await response.json()
+    expect(body.items.map(({ title }: { title: string }) => title)).toEqual(Array.from({ length: 32 }, (_, index) => 'Film ' + (index + 1)))
+    expect(upstream).toHaveBeenCalledTimes(2)
   })
 })

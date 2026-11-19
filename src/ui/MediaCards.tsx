@@ -5,11 +5,11 @@ import type { ComponentProps } from 'react'
 import { Link } from 'react-router'
 import { mediaKey } from '../domain/catalog'
 import { formatLabel, progressText } from '../domain/media'
-import type { LibraryEntry, Media } from '../domain/media'
+import type { LibraryEntry, Media, Status } from '../domain/media'
 import { titlePath, useOpenDetail } from './detail-navigation'
 import { layoutSpring, rise, useMotionEnabled } from './motion'
 
-export type OpenLog = (media: Media, trigger: HTMLElement) => void
+export type OpenLog = (media: Media, trigger: HTMLElement, initialStatus?: Status) => void
 
 export function Poster({ media, sharedId, eager = false }: { media: Media; sharedId?: string; eager?: boolean }) {
   const [failedSource, setFailedSource] = useState<string>()
@@ -28,6 +28,7 @@ export function Poster({ media, sharedId, eager = false }: { media: Media; share
           height="627"
           loading={eager ? 'eager' : 'lazy'}
           decoding="async"
+          draggable={false}
           referrerPolicy="no-referrer"
           onLoad={() => setLoadedSource(media.poster)}
           onError={() => setFailedSource(media.poster)}
@@ -75,10 +76,11 @@ interface GridProps {
   entries: ReadonlyMap<string, LibraryEntry>
   shelf: string
   onLog?: OpenLog
+  titleLink?: (media: Media) => string
   highlightId?: string
 }
 
-export function PosterGrid({ items, entries, shelf, onLog, highlightId }: GridProps) {
+export function PosterGrid({ items, entries, shelf, onLog, titleLink, highlightId }: GridProps) {
   const animate = useMotionEnabled()
   const openDetail = useOpenDetail()
   const byKey = new Map([...entries.values()].map((entry) => [mediaKey(entry.media), entry]))
@@ -90,6 +92,11 @@ export function PosterGrid({ items, entries, shelf, onLog, highlightId }: GridPr
           const key = mediaKey(media)
           const entry = entries.get(media.id) ?? byKey.get(key)
           const id = `${shelf}-${key}`.replaceAll(' ', '-').toLowerCase()
+          const content = <>
+            <Poster media={media} sharedId={id} eager={index < 6} />
+            <span className="poster-title">{media.title}</span>
+            <span className="poster-meta">{formatLabel(media)}{media.year ? ` · ${media.year}` : ''}</span>
+          </>
           return (
             <AnimatedListItem
               key={key}
@@ -103,11 +110,8 @@ export function PosterGrid({ items, entries, shelf, onLog, highlightId }: GridPr
               custom={index}
               transition={layoutSpring}
             >
-              <DetailLink id={id} media={entry?.media ?? media} className="poster-link">
-                <Poster media={media} sharedId={id} eager={index < 6} />
-                <span className="poster-title">{media.title}</span>
-                <span className="poster-meta">{formatLabel(media)}{media.year ? ` · ${media.year}` : ''}</span>
-              </DetailLink>
+              {titleLink ? <Link id={id} to={titleLink(media)} className="poster-link">{content}</Link>
+                : <DetailLink id={id} media={entry?.media ?? media} className="poster-link">{content}</DetailLink>}
               {onLog ? (
                 <button
                   className="poster-action"
@@ -131,7 +135,7 @@ export function PosterGrid({ items, entries, shelf, onLog, highlightId }: GridPr
                   </motion.span>
                 </button>
               ) : null}
-              {entry ? (
+              {entry?.status ? (
                 <motion.span
                   key={entry.status}
                   initial={animate ? 'hidden' : false}

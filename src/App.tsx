@@ -10,10 +10,11 @@ import { useCatalogDetail, useConnection, demoMode } from './data/useCatalog'
 import { statuses } from './domain/media'
 import { library } from './data/library'
 import { useLibrary } from './data/useLibrary'
-import type { Episode, LibraryEntry, LogDraft, Media } from './domain/media'
+import type { Episode, LibraryEntry, LogDraft, Media, PreferenceChange, Status } from './domain/media'
 import { Dashboard } from './screens/Dashboard'
 import { Details } from './screens/Details'
 import { Library } from './screens/Library'
+import { Popular } from './screens/Popular'
 import { Search } from './screens/Search'
 import { appearanceKey, Settings, themes } from './screens/Settings'
 import type { Theme } from './screens/Settings'
@@ -26,10 +27,11 @@ import { crossfade, motionProperties, rise, useMotionEnabled } from './ui/motion
 
 const InstallStatus = lazy(() => import('./ui/InstallStatus'))
 
+// Owl mark (docs/brand/symbol-logos.html #03). Eyes, beak and smile are cut-outs, so it works on any background.
+const owlPath = 'M13 21L16.6 8.6Q17.3 6.6 18.9 8L27 15.5Q32 14 37 15.5L45.1 8Q46.7 6.6 47.4 8.6L51 21V39Q51 57 32 57Q13 57 13 39ZM15.2 28a8.3 8.3 0 1 0 16.6 0a8.3 8.3 0 1 0-16.6 0ZM32.2 28a8.3 8.3 0 1 0 16.6 0a8.3 8.3 0 1 0-16.6 0ZM20.6 26.5a3.9 3.9 0 1 0 7.8 0a3.9 3.9 0 1 0-7.8 0ZM37.6 26.5a3.9 3.9 0 1 0 7.8 0a3.9 3.9 0 1 0-7.8 0ZM29.2 35.4Q32 34.2 34.8 35.4L32.7 40.3Q32 41.4 31.3 40.3ZM19.4 43.6Q20.6 43 21.2 43.9Q25 49.4 32 49.7Q39 49.4 42.8 43.9Q43.4 43 44.6 43.6Q45.2 44.4 44.6 45.2Q40 51.9 32 52.2Q24 51.9 19.4 45.2Q18.8 44.4 19.4 43.6Z'
 const LogoMark = ({ size }: { size: number }) => (
-  <svg width={size} height={size} viewBox="6 6 20 20" aria-hidden="true">
-    <path d="M22.5 9.5H10.5v13h6M10.5 16h8" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
-    <circle cx="22" cy="22.5" r="2" fill="currentColor" />
+  <svg width={size} height={size} viewBox="7 4 50 55" aria-hidden="true">
+    <path d={owlPath} fill="currentColor" fillRule="evenodd" />
   </svg>
 )
 
@@ -85,8 +87,9 @@ export function App() {
   const origin = detailId ? readDetailOrigin(location.state) : undefined
   const browse = origin?.url ?? (detailId ? '' : location.pathname + location.search)
   const [path, query] = browse.split('?')
-  const rawStatus = new URLSearchParams(query).get('status')
-  const defaultStatus = statuses.find((status) => status === rawStatus) ?? null
+  const browseParams = new URLSearchParams(query)
+  const rawStatus = browseParams.get('status')
+  const defaultStatus = rawStatus === 'Watchlist' ? rawStatus : statuses.find((status) => status === rawStatus) ?? null
 
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -144,8 +147,8 @@ export function App() {
 
   const editing = session ? entries.get(session.media.id) ?? [...entries.values()].find((entry) => mediaKey(entry.media) === mediaKey(session.media)) : undefined
 
-  function openLog(media: Media, trigger: HTMLElement) {
-    setSession((previous) => ({ key: (previous?.key ?? 0) + 1, media, trigger }))
+  function openLog(media: Media, trigger: HTMLElement, initialStatus?: Status) {
+    setSession((previous) => ({ key: (previous?.key ?? 0) + 1, media, trigger, initialStatus }))
     setLogOpen(true)
   }
 
@@ -158,6 +161,14 @@ export function App() {
   async function setEpisode(entry: LibraryEntry, episode: Episode, watched: boolean) {
     await library.setEpisode(entry.media.id, episode, watched)
     announce(watched ? `${episode.title} marked watched.` : `${episode.title} marked unwatched.`)
+  }
+
+  async function savePreference(media: Media, change: PreferenceChange) {
+    const { id } = await library.savePreference(media, change)
+    setHighlightId(id)
+    if (change.kind === 'like') announce(change.value ? `${media.title} liked.` : `Like removed from ${media.title}.`)
+    if (change.kind === 'watchlist') announce(change.value ? `${media.title} added to Watchlist.` : `${media.title} removed from Watchlist.`)
+    if (change.kind === 'rating') announce(change.value === null ? `Rating removed from ${media.title}.` : `${media.title} rated ${change.value} out of 5.`)
   }
 
   async function remove(media: Media) {
@@ -174,10 +185,10 @@ export function App() {
 
   return (
     <MotionConfig reducedMotion={animate ? 'never' : 'always'}>
-      <div className="app-shell" style={motionProperties} data-motion={animate ? 'full' : 'reduced'}>
+      <div className="app-shell" style={motionProperties} data-motion={animate ? 'full' : 'reduced'} data-popular-view={path === '/popular' && !detailId || undefined}>
         <a href="#main-content" className="skip-link">Skip to content</a>
         <aside className="sidebar">
-          <Link to="/" className="wordmark"><span className="brand-mark"><LogoMark size={20} /></span> Epilog</Link>
+          <Link to="/" className="wordmark"><LogoMark size={34} /> Epilog</Link>
           <nav aria-label="Primary">
             {navigation.map(({ to, label, Icon }) => (
               <NavLink key={to} to={to} end className={linkProps}><Icon size={21} /> {label}</NavLink>
@@ -185,7 +196,7 @@ export function App() {
           </nav>
         </aside>
         <header className="mobile-header">
-          <Link to="/" className="wordmark"><span className="brand-mark"><LogoMark size={19} /></span> Epilog</Link>
+          <Link to="/" className="wordmark"><LogoMark size={30} /> Epilog</Link>
           <div>
             <NavLink to="/search" className="icon-button" aria-label="Search"><MagnifyingGlassIcon size={22} /></NavLink>
             <NavLink to="/settings" className="icon-button" aria-label="Settings"><GearSixIcon size={22} /></NavLink>
@@ -212,7 +223,8 @@ export function App() {
               >
                 {path === '/' ? <Dashboard entries={entries} onLog={openLog} />
                   : path === '/library' ? <Library entries={entries} defaultStatus={defaultStatus} highlightId={highlightId} />
-                  : path === '/search' ? <Search entries={entries} onLog={openLog} />
+                  : path === '/popular' ? <Popular entries={entries} query={query ?? ''} onLog={openLog} onPreference={savePreference} />
+                  : path === '/search' ? <Search entries={entries} onLog={(media, trigger) => openLog(media, trigger, browseParams.get('action') === 'watch' ? 'Completed' : undefined)} />
                   : path === '/settings' ? <Settings theme={theme} onTheme={changeTheme} storageError={storageError} onRestore={(count) => announce(count ? 'Backup restored.' : 'Backup reviewed. Your library is already up to date.')} />
                   : <MissingPage />}
               </motion.div>

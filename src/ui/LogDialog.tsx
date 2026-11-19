@@ -1,16 +1,18 @@
 import { XIcon } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { formatLabel, isCalendarDate, localDate, parseHours, statuses, titleLengthLimit } from '../domain/media'
 import type { LibraryEntry, LogDraft, Media, Status } from '../domain/media'
 import { Poster } from './MediaCards'
 import { rise, useMotionEnabled } from './motion'
+import { useModal } from './useModal'
 
 export interface LogSession {
   key: number
   media: Media
   trigger: HTMLElement
+  initialStatus?: Status
 }
 
 interface Props {
@@ -22,21 +24,8 @@ interface Props {
 }
 
 export function LogDialog({ session, open, entry, onClose, onSave }: Props) {
-  const dialog = useRef<HTMLDialogElement>(null)
+  const dialog = useModal(open, session?.trigger, 'input:checked')
   const [busy, setBusy] = useState(false)
-
-  useLayoutEffect(() => {
-    const element = dialog.current
-    if (!element) return
-    if (open && !element.open) {
-      element.showModal()
-      element.querySelector<HTMLElement>('input:checked')?.focus({ preventScroll: true })
-    }
-    if (!open && element.open) {
-      element.close()
-      session?.trigger.focus({ preventScroll: true })
-    }
-  }, [open, session])
 
   return (
     <dialog
@@ -52,6 +41,7 @@ export function LogDialog({ session, open, entry, onClose, onSave }: Props) {
         <LogForm
           key={session.key}
           media={session.media}
+          initialStatus={session.initialStatus}
           entry={entry}
           busy={busy}
           setBusy={setBusy}
@@ -65,6 +55,7 @@ export function LogDialog({ session, open, entry, onClose, onSave }: Props) {
 
 interface FormProps {
   media: Media
+  initialStatus?: Status
   entry?: LibraryEntry
   busy: boolean
   setBusy: (busy: boolean) => void
@@ -72,8 +63,8 @@ interface FormProps {
   onSave: Props['onSave']
 }
 
-function LogForm({ media, entry, busy, setBusy, onClose, onSave }: FormProps) {
-  const [status, setStatus] = useState<Status>(entry?.status ?? 'Planned')
+function LogForm({ media, initialStatus, entry, busy, setBusy, onClose, onSave }: FormProps) {
+  const [status, setStatus] = useState<Status>(initialStatus ?? entry?.status ?? 'Planned')
   const [date, setDate] = useState(localDate)
   const [another, setAnother] = useState(false)
   const [hours, setHours] = useState(entry?.playtimeMinutes === undefined ? '' : String(entry.playtimeMinutes / 60))
@@ -144,8 +135,13 @@ function LogForm({ media, entry, busy, setBusy, onClose, onSave }: FormProps) {
       {needsDate ? (
         <motion.label className="field" initial={animate ? 'hidden' : false} animate="visible" variants={rise}>
           {media.format === 'MOVIE' ? 'Watch date' : 'Completion date'}
-          <input type="date" value={date} required onChange={(event) => setDate(event.target.value)} disabled={busy} />
+          <input type="date" value={date} required onChange={(event) => setDate(event.target.value)} disabled={busy} aria-describedby={media.format === 'SERIES' ? 'series-completion-help' : undefined} />
         </motion.label>
+      ) : null}
+      {needsDate && media.format === 'SERIES' ? (
+        <motion.p id="series-completion-help" className="muted" initial={animate ? 'hidden' : false} animate="visible" variants={rise}>
+          Episodes through the completion date will be marked watched.
+        </motion.p>
       ) : null}
       {media.format === 'GAME' ? (
         <label className="field">

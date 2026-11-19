@@ -6,6 +6,20 @@ export type Category = (typeof categories)[number]
 export const statuses = ['Planned', 'In progress', 'Completed', 'Dropped'] as const
 export type Status = (typeof statuses)[number]
 
+export const ratings = [1, 2, 3, 4, 5] as const
+export type Rating = (typeof ratings)[number]
+
+export interface TitlePreferences {
+  liked?: boolean
+  rating?: Rating
+  watchlisted?: boolean
+}
+
+export type PreferenceChange =
+  | { kind: 'like'; value: boolean }
+  | { kind: 'rating'; value: Rating | null }
+  | { kind: 'watchlist'; value: boolean }
+
 export interface EpisodePosition {
   season: number
   number: number
@@ -19,6 +33,7 @@ export interface Season {
 export interface Episode extends EpisodePosition {
   title: string
   externalId?: string
+  airDate?: string
 }
 
 interface MediaFields {
@@ -44,12 +59,13 @@ export interface Completion {
   date: string
 }
 
-export interface LibraryEntry {
+export interface LibraryEntry extends TitlePreferences {
   media: Media
-  status: Status
+  status?: Status
   completions: readonly Completion[]
   playtimeMinutes?: number
   watched: readonly Episode[]
+  unwatched: readonly EpisodePosition[]
   updatedAt: number
   label?: string
 }
@@ -62,6 +78,10 @@ export interface LogDraft {
 }
 
 export const titleLengthLimit = 180
+
+export function isWatchlisted(entry?: LibraryEntry) {
+  return entry?.watchlisted ?? entry?.status === 'Planned'
+}
 
 export function primaryCategory(media: Media): Exclude<Category, 'All'> {
   if (media.anime) return 'Anime'
@@ -107,10 +127,26 @@ export function isEpisodePosition(position: EpisodePosition) {
     Number.isSafeInteger(position.number) && position.number >= 1
 }
 
-export function nextEpisode(entry: LibraryEntry) {
-  if (entry.media.format !== 'SERIES') return undefined
+function seriesCompletionDate(entry: LibraryEntry) {
+  return entry.completions.reduce((latest, { date }) => date > latest ? date : latest, '') ||
+    (entry.status === 'Completed' ? localDate(new Date(entry.updatedAt)) : '')
+}
+
+export function episodeWatchState(entry: LibraryEntry) {
   const watched = new Set(entry.watched.map(episodeKey))
-  return entry.media.episodes?.find((episode) => episode.season > 0 && !watched.has(episodeKey(episode)))
+  const unwatched = new Set(entry.unwatched.map(episodeKey))
+  const completedThrough = seriesCompletionDate(entry)
+  return (episode: Episode) => {
+    const key = episodeKey(episode)
+    return watched.has(key) || Boolean(completedThrough && !unwatched.has(key) &&
+      (!episode.airDate || episode.airDate <= completedThrough))
+  }
+}
+
+export function nextEpisode(entry: LibraryEntry) {
+  if (entry.media.format !== 'SERIES' || entry.status === 'Completed') return undefined
+  const isWatched = episodeWatchState(entry)
+  return entry.media.episodes?.find((episode) => episode.season > 0 && !isWatched(episode))
 }
 
 const hoursFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
@@ -120,12 +156,22 @@ export function progressText(entry: LibraryEntry) {
     return `${hoursFormatter.format(entry.playtimeMinutes / 60)} hr played`
   }
   if (entry.media.format === 'SERIES') {
-    const watched = entry.watched.filter((episode) => episode.season > 0).length
+    const episodes = entry.media.episodes ?? []
+    const hasCompletion = entry.completions.length > 0
+    if (entry.status === 'Completed' || (!episodes.length && hasCompletion)) return entry.status ?? 'Saved'
+    const watchedKeys = new Set(entry.watched.filter((episode) => episode.season > 0).map(episodeKey))
+    if (hasCompletion) {
+      const isWatched = episodeWatchState(entry)
+      for (const episode of episodes) {
+        if (episode.season > 0 && isWatched(episode)) watchedKeys.add(episodeKey(episode))
+      }
+    }
+    const watched = watchedKeys.size
     return entry.media.episodeTotal === undefined || watched > entry.media.episodeTotal
       ? `${watched} ${watched === 1 ? 'episode' : 'episodes'} watched`
       : `${watched} of ${entry.media.episodeTotal} episodes`
   }
-  return entry.status
+  return entry.status ?? 'Saved'
 }
 
 export function localDate(date = new Date()) {
@@ -167,25 +213,44 @@ export function updateEntry(media: Media, current: LibraryEntry | undefined, dra
   const label = draft.label === undefined ? current?.label : draft.label.trim() || undefined
   if (label && label.length > titleLengthLimit) throw new Error('Choose a shorter backup label.')
   const addsCompletion = draft.status === 'Completed' && completion && !completions.some(({ id }) => id === completion.id)
+  const completesSeries = media.format === 'SERIES' && draft.status === 'Completed' && (current?.status !== 'Completed' || addsCompletion)
   return {
+    liked: current?.liked,
+    rating: current?.rating,
+    watchlisted: current?.watchlisted,
     media,
     status: draft.status,
     completions: addsCompletion ? [...completions, completion] : completions,
     playtimeMinutes: media.format === 'GAME' ? draft.playtimeMinutes : undefined,
     watched: current?.watched ?? [],
+    unwatched: completesSeries ? [] : current?.unwatched ?? [],
     updatedAt: now,
     label,
+  }
+}
+
+export function updatePreference(media: Media, current: LibraryEntry | undefined, change: PreferenceChange, now: number): LibraryEntry {
+  const entry = current ?? { media, completions: [], watched: [], unwatched: [], updatedAt: now }
+  switch (change.kind) {
+    case 'like': return { ...entry, liked: change.value, updatedAt: now }
+    case 'watchlist': return { ...entry, watchlisted: change.value, updatedAt: now }
+    case 'rating':
+      if (change.value !== null && !ratings.includes(change.value)) throw new Error('Choose a rating from 1 to 5 stars.')
+      return { ...entry, rating: change.value ?? undefined, updatedAt: now }
   }
 }
 
 export function updateEpisode(entry: LibraryEntry, episode: Episode, watched: boolean, now: number): LibraryEntry {
   if (entry.media.format !== 'SERIES') throw new Error('Only series have episodes.')
   if (!isEpisodePosition(episode)) throw new Error('Choose a valid episode.')
-  const episodes = entry.watched.filter((item) => episodeKey(item) !== episodeKey(episode))
+  const key = episodeKey(episode)
+  const episodes = entry.watched.filter((item) => episodeKey(item) !== key)
+  const unwatched = entry.unwatched.filter((item) => episodeKey(item) !== key)
   return {
     ...entry,
-    status: watched && entry.status === 'Planned' ? 'In progress' : entry.status,
+    status: watched && (!entry.status || entry.status === 'Planned') ? 'In progress' : entry.status,
     watched: watched ? [...episodes, episode] : episodes,
+    unwatched: watched ? unwatched : [...unwatched, { season: episode.season, number: episode.number }],
     updatedAt: now,
   }
 }

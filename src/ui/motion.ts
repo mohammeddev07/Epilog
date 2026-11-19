@@ -46,3 +46,8 @@ export const crossfade = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { duration: duration.filter, ease: easeOut } },
 } satisfies Variants
+
+export const slide = {
+  hidden: (direction: number) => ({ opacity: 0, x: direction * 24 }),
+  visible: { opacity: 1, x: 0, transition: { duration: duration.base, ease: easeOut } },
+} satisfies Variants

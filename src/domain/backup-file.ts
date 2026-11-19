@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { backupFormat, backupSizeLimit, backupVersion } from './backup'
 import type { Backup } from './backup'
-import { episodeKey, isCalendarDate, statuses, titleLengthLimit } from './media'
+import { episodeKey, isCalendarDate, ratings, statuses, titleLengthLimit } from './media'
 
 const safeIdentifier = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9-]{0,127}$/)
 const timestamp = z.int().nonnegative().max(8_640_000_000_000_000)
@@ -35,11 +35,22 @@ const entrySchema = z.strictObject({
   episodes: z.array(episodeSchema),
 })
 
-const backupSchema = z.strictObject({
+const legacyBackupSchema = z.strictObject({
   format: z.literal(backupFormat),
-  version: z.literal(backupVersion),
+  version: z.literal(1),
   entries: z.array(entrySchema),
 })
+
+const backupSchema = z.union([legacyBackupSchema, z.strictObject({
+  format: z.literal(backupFormat),
+  version: z.literal(backupVersion),
+  entries: z.array(entrySchema.extend({
+    status: z.enum(statuses).optional(),
+    liked: z.boolean().optional(),
+    rating: z.literal(ratings).optional(),
+    watchlisted: z.boolean().optional(),
+  })),
+})])
 
 export function parseBackup(text: string): Backup {
   if (new TextEncoder().encode(text).length > backupSizeLimit) throw new Error('The backup exceeds 10 MB.')
