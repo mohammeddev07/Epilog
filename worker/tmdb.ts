@@ -1,7 +1,7 @@
-import { discoverResultLimit, interleave, searchResultLimit } from '../src/domain/catalog'
+import { discoverResultLimit, interleave, searchResultLimit, uniqueMedia } from '../src/domain/catalog'
 import type { DiscoverSection } from '../src/domain/catalog'
 import { catalogKey } from '../src/domain/identity'
-import { episodeKey } from '../src/domain/media'
+import { episodeKey, isCalendarDate } from '../src/domain/media'
 import type { Episode, Media } from '../src/domain/media'
 import { CatalogFailure, Cooldown, externalId, nonnegativeInteger, plainText, providerJson, record, records, validYear } from './http'
 import type { FetchProvider, JsonObject } from './http'
@@ -91,8 +91,10 @@ export class TmdbAdapter {
       return combine(results, discoverResultLimit)
     }
     const entity = category === 'Movies' ? 'movie' : 'tv'
-    const items = await this.list(token, entity, `/discover/${entity}`, sort)
-    return { items: items.slice(0, discoverResultLimit) }
+    const results = await Promise.allSettled([1, 2].map((page) =>
+      this.list(token, entity, `/trending/${entity}/week`, { page: String(page) }),
+    ))
+    return combine(results, discoverResultLimit, 'ranked')
   }
 
   async detail(token: string | undefined, entity: WatchEntity, id: string) {
@@ -107,6 +109,7 @@ export class TmdbAdapter {
     const byPosition = new Map<string, Episode | null>()
     for (const item of records(raw.episodes)) {
       const number = nonnegativeInteger(item.episode_number)
+      const date = item.air_date
       if (!number || nonnegativeInteger(item.season_number) !== season) continue
       const position = { season, number }
       const key = episodeKey(position)
@@ -114,6 +117,7 @@ export class TmdbAdapter {
         ...position,
         title: plainText(item.name, 220) || `Episode ${number}`,
         externalId: externalId(item.id),
+        airDate: typeof date === 'string' && isCalendarDate(date) ? date : undefined,
       }
       byPosition.set(key, byPosition.has(key) ? null : instance)
     }
@@ -121,11 +125,12 @@ export class TmdbAdapter {
   }
 }
 
-function combine(results: PromiseSettledResult<Media[]>[], limit: number) {
+function combine(results: PromiseSettledResult<Media[]>[], limit: number, order: 'interleave' | 'ranked' = 'interleave') {
   const available = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
   if (!available.length) {
     const first = results.find((result) => result.status === 'rejected')
     throw first?.reason ?? new CatalogFailure(502)
   }
-  return { items: interleave(available).slice(0, limit), partial: available.length < results.length || undefined }
+  const ordered = order === 'ranked' ? available.flat() : interleave(available)
+  return { items: uniqueMedia(ordered).slice(0, limit), partial: available.length < results.length || undefined }
 }

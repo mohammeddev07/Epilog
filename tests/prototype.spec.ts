@@ -37,12 +37,13 @@ test('logs a film by keyboard, announces the save, and restores focus to the sav
 
 test('search keeps the same focused card after saving and supports editing game hours', async ({ page }) => {
   await page.goto('/')
-  await page.getByRole('link', { name: 'Log a title' }).click()
+  await page.getByRole('link', { name: 'Watch', exact: true }).click()
   const query = page.getByRole('searchbox', { name: 'Search catalog' })
   await expect(query).toBeFocused()
   await query.fill('Starlight')
   await page.getByRole('button', { name: 'Log Starlight Courier' }).click()
   const editor = page.getByRole('dialog')
+  await expect(editor.getByRole('radio', { name: 'Completed' })).toBeChecked()
   await editor.getByRole('radio', { name: 'In progress' }).check()
   await editor.getByLabel('Total hours').fill('-2')
   await editor.getByRole('button', { name: 'Save to library' }).click()
@@ -96,7 +97,7 @@ test('provides a two-column phone gallery, a touch editor, and reflows with larg
   })
   const page = await context.newPage()
   await page.goto('/')
-  const grid = page.getByRole('list', { name: 'Popular now', exact: true })
+  const grid = page.getByRole('list', { name: 'Popular This Week', exact: true })
   expect(await grid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(2)
   await page.getByRole('button', { name: 'Log Paper Moons' }).tap()
   const editor = page.getByRole('dialog')

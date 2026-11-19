@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import { Dexie } from 'dexie'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parseBackup } from '../domain/backup-file'
-import { manualEpisode } from '../domain/media'
+import { episodeWatchState, isWatchlisted, manualEpisode } from '../domain/media'
 import type { Media } from '../domain/media'
 import { demoCatalog } from './demo'
 import { createLibrary } from './library'
@@ -78,6 +78,43 @@ describe('IndexedDB library', () => {
     expect([...await store.read()].map(([id]) => id)).toEqual([film.id])
   })
 
+  it('stores likes, ratings, and watchlist choices independently of viewing history', async () => {
+    const store = open()
+    await Promise.all([
+      store.savePreference(film, { kind: 'like', value: true }),
+      store.savePreference(film, { kind: 'rating', value: 4 }),
+      store.savePreference(film, { kind: 'watchlist', value: true }),
+    ])
+    const first = (await store.read()).get(film.id)
+    expect(first).toMatchObject({ liked: true, rating: 4, watchlisted: true, completions: [] })
+    expect(first?.status).toBeUndefined()
+    const completion = { id: 'watch-event', date: '2026-11-19' }
+    await store.save(film, { status: 'Completed', completion })
+    await store.savePreference(film, { kind: 'watchlist', value: false })
+    const entry = (await store.read()).get(film.id)
+    expect(entry).toMatchObject({ status: 'Completed', completions: [completion], liked: true, rating: 4 })
+    expect(isWatchlisted(entry)).toBe(false)
+    await store.savePreference(film, { kind: 'rating', value: null })
+    expect((await store.read()).get(film.id)?.rating).toBeUndefined()
+  })
+
+  it('round-trips preferences in v2 backups and preserves them when applying a v1 backup', async () => {
+    const source = open()
+    await source.savePreference(game, { kind: 'like', value: true })
+    await source.savePreference(game, { kind: 'rating', value: 5 })
+    await source.savePreference(game, { kind: 'watchlist', value: false })
+    const serialized = JSON.stringify(await source.exportBackup())
+    expect(() => parseBackup(serialized.replace('"rating":5', '"rating":6'))).toThrow('supported Epilog backup')
+    const target = open()
+    await target.applyRestore(await target.previewRestore(parseBackup(serialized)), false)
+    const legacy = parseBackup(JSON.stringify({
+      format: 'epilog-library', version: 1,
+      entries: [{ media: { id: game.id, format: 'GAME', anime: false }, status: 'Planned', createdAt: 1, updatedAt: 2, completions: [], episodes: [] }],
+    }))
+    await target.applyRestore(await target.previewRestore(legacy), true)
+    expect((await target.read()).get(game.id)).toMatchObject({ status: 'Planned', liked: true, rating: 5, watchlisted: false })
+  })
+
   it('stores manual watched and unwatched episode choices and removes dependent records', async () => {
     const store = open()
     await store.save(anime, { status: 'Planned' })
@@ -90,6 +127,32 @@ describe('IndexedDB library', () => {
     expect((await store.exportBackup()).entries).toEqual([])
     await store.save(anime, { status: 'Planned' })
     expect((await store.exportBackup()).entries[0].episodes).toEqual([])
+  })
+
+  it('restores legacy series completions and retains episode overrides until another completion is logged', async () => {
+    const store = open()
+    const episode = manualEpisode({ season: 1, number: 2 })
+    const completion = { id: 'first-watch', date: '2026-11-18' }
+    const legacy = parseBackup(JSON.stringify({
+      format: 'epilog-library', version: 1, entries: [{
+        media: { id: anime.id, format: 'SERIES', anime: true }, status: 'Completed', createdAt: 1, updatedAt: 2,
+        completions: [completion], episodes: [],
+      }],
+    }))
+    await store.applyRestore(await store.previewRestore(legacy), false)
+    const readWatched = async () => episodeWatchState((await store.read()).get(anime.id)!)(episode)
+    expect(await readWatched()).toBe(true)
+
+    await store.setEpisode(anime.id, episode, false)
+    await store.save(anime, { status: 'Completed', completion })
+    expect(await readWatched()).toBe(false)
+    const snapshot = parseBackup(JSON.stringify(await store.exportBackup()))
+    expect(snapshot.entries[0].episodes).toMatchObject([{ season: 1, number: 2, watched: false }])
+
+    const again = { id: 'second-watch', date: '2026-11-19' }
+    await store.save(anime, { status: 'Completed', completion: again })
+    expect(await readWatched()).toBe(true)
+    expect((await store.read()).get(anime.id)?.completions).toEqual([completion, again])
   })
 
   it('excludes provider material from backups and keeps activity after cached catalog links expire', async () => {

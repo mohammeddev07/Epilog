@@ -1,8 +1,8 @@
-import { BooksIcon, MagnifyingGlassIcon, PlusIcon } from '@phosphor-icons/react'
+import { BooksIcon, EyeIcon, MagnifyingGlassIcon } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
 import { useState } from 'react'
 import { Link } from 'react-router'
-import { inCategory, matchesQuery, statuses } from '../domain/media'
+import { inCategory, isWatchlisted, matchesQuery, statuses } from '../domain/media'
 import type { Category, LibraryEntry } from '../domain/media'
 import { CategoryPicker } from '../ui/CategoryPicker'
 import { PosterGrid } from '../ui/MediaCards'
@@ -26,7 +26,7 @@ export function Library({ entries, defaultStatus, highlightId }: {
   const visible = all.filter((entry) => (
     inCategory(entry.media, category) &&
     matchesQuery(entry.media, query) &&
-    (!status || entry.status === status) &&
+    (!status || (status === 'Watchlist' ? isWatchlisted(entry) : entry.status === status)) &&
     (!genre || entry.media.genres.includes(genre)) &&
     (!year || String(entry.media.year) === year)
   )).sort((a, b) => sort === 'title' ? a.media.title.localeCompare(b.media.title) : b.updatedAt - a.updatedAt)
@@ -43,7 +43,7 @@ export function Library({ entries, defaultStatus, highlightId }: {
     <>
       <header className="page-intro">
         <div><h1 tabIndex={-1}>Library</h1><p>Everything you watch and play, in one place.</p></div>
-        <Link to="/search" className="button button-primary"><PlusIcon size={20} weight="bold" /> Log a title</Link>
+        <Link to="/search?action=watch" className="button button-primary"><EyeIcon size={20} weight="bold" /> Watch</Link>
       </header>
       <section aria-label="Saved titles">
         <div className="library-tabs">
@@ -60,6 +60,7 @@ export function Library({ entries, defaultStatus, highlightId }: {
           </label>
           <label><span className="sr-only">Status filter</span><select value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="">All statuses</option>
+            <option value="Watchlist">Watchlist</option>
             {statuses.map((item) => <option key={item}>{item}</option>)}
           </select></label>
           {genres.length || genre ? (

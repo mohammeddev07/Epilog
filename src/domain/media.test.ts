@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { demoCatalog } from '../data/demo'
 import {
-  episodeKey, inCategory, isCalendarDate, matchesQuery, nextEpisode, parseHours,
+  episodeKey, episodeWatchState, inCategory, isCalendarDate, matchesQuery, nextEpisode, parseHours,
   progressText, updateEntry, updateEpisode,
 } from './media'
 
@@ -51,5 +51,20 @@ describe('catalog and tracking rules', () => {
     const reversed = updateEpisode(watched, episode, false, 3)
     expect(reversed.watched).toEqual([])
     expect(nextEpisode(reversed)).toEqual(episode)
+  })
+
+  it('uses a completion date for every known season and respects later manual edits', () => {
+    const completed = updateEntry(series, undefined, {
+      status: 'Completed', completion: { id: 'first-watch', date: '2026-11-18' },
+    }, Date.UTC(2026, 10, 19))
+    const sameDay = { season: 1, number: 3, title: 'Finale', airDate: '2026-11-18' }
+    const olderSecondSeason = { season: 2, number: 1, title: 'Second season', airDate: '2026-11-16' }
+    const later = { season: 2, number: 2, title: 'New episode', airDate: '2026-11-21' }
+    expect([sameDay, olderSecondSeason, later].map(episodeWatchState(completed))).toEqual([true, true, false])
+    expect(nextEpisode(completed)).toBeUndefined()
+    expect(progressText(completed)).toBe('Completed')
+    const edited = updateEpisode(completed, sameDay, false, completed.updatedAt + 1)
+    expect(episodeWatchState(edited)(sameDay)).toBe(false)
+    expect(episodeWatchState(edited)(olderSecondSeason)).toBe(true)
   })
 })

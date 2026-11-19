@@ -58,8 +58,9 @@ function useResource(
   freshness: number,
   retry: number,
   query?: string,
+  cacheVersion?: string,
 ) {
-  const key = query === undefined ? path : `${path}:${query.toLowerCase()}`
+  const key = cacheVersion ? `${path}:${cacheVersion}` : query === undefined ? path : `${path}:${query.toLowerCase()}`
   const connected = useConnection()
   const [state, setState] = useState<State>(statusOnly('', 'idle'))
   const active = enabled && !demoMode
@@ -120,8 +121,8 @@ export function useProviderSearch(provider: Provider, rawQuery: string, retry: n
   return useResource(`search/${provider}`, provider, Boolean(query), 10 * minute, retry, query)
 }
 
-export function usePopularity(section: DiscoverSection, retry: number) {
-  return useResource(`popular/${sectionPaths[section]}`, section === 'Games' ? 'igdb' : 'tmdb', true, 20 * minute, retry)
+export function usePopularity(section: DiscoverSection, retry: number, enabled: boolean) {
+  return useResource(`popular/${sectionPaths[section]}`, section === 'Games' ? 'igdb' : 'tmdb', enabled, 20 * minute, retry, undefined, 'weekly-v1')
 }
 
 export function useCatalogDetail(identity: CatalogIdentity | undefined, retry: number) {
