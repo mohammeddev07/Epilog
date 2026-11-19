@@ -1,0 +1,9 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "epilog",
+  "pages_build_output_dir": "../dist",
+  "compatibility_date": "2026-11-18",
+  "services": [
+    { "binding": "CATALOG", "service": "epilog" }
+  ]
+}

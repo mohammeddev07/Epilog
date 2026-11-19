@@ -1,0 +1,117 @@
+import { motion } from 'motion/react'
+import { useRef, useState } from 'react'
+import type { FormEvent } from 'react'
+import { useCatalogSeason } from '../data/useCatalog'
+import { CatalogFeedback, catalogMessage, CatalogSkeleton, offlineCacheError } from './CatalogFeedback'
+import { episodeKey, isEpisodePosition, manualEpisode, nextEpisode } from '../domain/media'
+import type { Episode, LibraryEntry } from '../domain/media'
+import { rise, useMotionEnabled } from './motion'
+
+export type SetEpisode = (entry: LibraryEntry, episode: Episode, watched: boolean) => Promise<void>
+
+export function EpisodeTracker({ entry, episodes = [], onEpisode }: {
+  entry: LibraryEntry
+  episodes?: readonly Episode[]
+  onEpisode: SetEpisode
+}) {
+  const [selection, setSelection] = useState<number>()
+  const [retry, setRetry] = useState(0)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const pending = useRef(false)
+  const animate = useMotionEnabled()
+  const watched = new Map(entry.watched.map((item) => [episodeKey(item), item]))
+  const known = entry.media.format === 'SERIES' ? entry.media.seasons ?? [] : []
+  const seasons = [...new Set([
+    ...known.map(({ number }) => number),
+    ...entry.watched.map(({ season }) => season),
+    ...episodes.map(({ season }) => season),
+  ])].sort((a, b) => a - b)
+  const firstUnfinished = known.find(({ number, episodeCount }) => number > 0 && (
+    episodeCount === undefined || !episodeCount || entry.watched.filter((episode) => episode.season === number && episode.number <= episodeCount).length < episodeCount
+  ))
+  const defaultSeason = firstUnfinished?.number ?? nextEpisode(entry)?.season ?? seasons.find((number) => number > 0) ?? seasons[0]
+  const currentSeason = selection !== undefined && seasons.includes(selection) ? selection : defaultSeason
+  const catalog = useCatalogSeason(entry.media.identity, currentSeason, retry)
+  const available = new Map([...watched, ...[...episodes, ...(catalog.episodes ?? [])].map((episode) => [episodeKey(episode), episode] as const)])
+  const next = nextEpisode(entry) ?? (currentSeason === defaultSeason
+    ? catalog.episodes?.find((episode) => episode.season > 0 && !watched.has(episodeKey(episode)))
+    : undefined)
+  const feedback = [catalogMessage('episode catalog', catalog.status, catalog.retryAfter), catalog.cacheError ? offlineCacheError : ''].filter(Boolean)
+
+  async function save(episode: Episode, checked: boolean) {
+    if (pending.current) return
+    pending.current = true
+    setBusy(true)
+    setSelection(episode.season)
+    setError('')
+    try {
+      await onEpisode(entry, episode, checked)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Episode progress could not be saved. Try again.')
+    } finally {
+      pending.current = false
+      setBusy(false)
+    }
+  }
+
+  function markManual(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const fields = new FormData(event.currentTarget)
+    const season = String(fields.get('season') ?? '')
+    const number = String(fields.get('number') ?? '')
+    const position = { season: Number(season), number: Number(number) }
+    if (!season || !number || !isEpisodePosition(position)) {
+      setError('Enter a whole-number season and episode. Use season 0 for specials.')
+      return
+    }
+    void save(available.get(episodeKey(position)) ?? manualEpisode(position), true)
+  }
+
+  return (
+    <section className="shelf detail-section" aria-labelledby="episodes-heading">
+      <h2 id="episodes-heading">Episodes</h2>
+      {next ? <p className="muted">Next up · Season {next.season}, episode {next.number} · {next.title}</p> : null}
+      {feedback.length ? <CatalogFeedback messages={feedback} retry={catalog.status === 'offline' ? undefined : () => setRetry((value) => value + 1)} loading={catalog.status === 'loading'} /> : null}
+      {catalog.status === 'loading' && !catalog.episodes ? <CatalogSkeleton /> : null}
+      {currentSeason !== undefined ? (
+        <>
+          <label className="episode-season">Season
+            <select value={currentSeason} onChange={(event) => setSelection(Number(event.target.value))}>
+              {seasons.map((season) => <option key={season} value={season}>{season === 0 ? 'Specials' : season}</option>)}
+            </select>
+          </label>
+          <motion.ul className="episode-list" key={currentSeason} initial={animate ? 'hidden' : false} animate="visible" variants={rise}>
+            {[...available.values()].filter((episode) => episode.season === currentSeason)
+              .sort((first, second) => first.number - second.number).map((episode) => (
+                <li key={episodeKey(episode)}>
+                  <label className="episode-row">
+                    <span><span className="muted">{episode.number}.</span> {episode.title}</span>
+                    <span className="check-field">
+                      Watched
+                      <input
+                        type="checkbox"
+                        aria-label={`Watched ${episode.title}`}
+                        checked={watched.has(episodeKey(episode))}
+                        aria-disabled={busy || undefined}
+                        onChange={(event) => void save(episode, event.target.checked)}
+                      />
+                    </span>
+                  </label>
+                </li>
+              ))}
+          </motion.ul>
+        </>
+      ) : <p className="muted">Episode details are unavailable. You can still mark an episode by number.</p>}
+      <details className="manual-episode">
+        <summary>Log an episode by number</summary>
+        <form className="manual-episode-form" onSubmit={markManual} noValidate>
+          <label className="field">Season number<input type="number" name="season" min="0" defaultValue={currentSeason ?? 1} required /></label>
+          <label className="field">Episode number<input type="number" name="number" min="1" required /></label>
+          <button type="submit" className="button button-secondary" disabled={busy}>Mark watched</button>
+        </form>
+      </details>
+      {error ? <motion.p role="alert" className="form-error" initial={animate ? 'hidden' : false} animate="visible" variants={rise}>{error}</motion.p> : null}
+    </section>
+  )
+}
