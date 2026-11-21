@@ -11,6 +11,7 @@ import { statuses } from './domain/media'
 import { library } from './data/library'
 import { useLibrary } from './data/useLibrary'
 import type { Episode, LibraryEntry, LogDraft, Media, PreferenceChange, Status } from './domain/media'
+import { Compare } from './screens/Compare'
 import { Dashboard } from './screens/Dashboard'
 import { Details } from './screens/Details'
 import { Library } from './screens/Library'
@@ -160,9 +161,17 @@ export function App() {
     announce(created ? `${media.title} saved to Library.` : `Changes to ${media.title} saved.`)
   }
 
-  async function setEpisode(entry: LibraryEntry, episode: Episode, watched: boolean) {
-    await library.setEpisode(entry.media.id, episode, watched)
-    announce(watched ? `${episode.title} marked watched.` : `${episode.title} marked unwatched.`)
+  async function completeToday(media: Media) {
+    const { id, changed } = await library.completeToday(media)
+    if (!changed) return
+    setHighlightId(id)
+    announce(`${media.title} marked ${media.format === 'GAME' ? 'played' : 'watched'}.`)
+  }
+
+  async function setEpisode(entry: LibraryEntry, episodes: readonly Episode[], watched: boolean) {
+    await library.setEpisode(entry.media.id, episodes, watched)
+    const name = episodes.length === 1 ? episodes[0].title : `Season ${episodes[0].season}`
+    announce(`${name} marked ${watched ? 'watched' : 'unwatched'}.`)
   }
 
   async function savePreference(media: Media, change: PreferenceChange) {
@@ -198,10 +207,10 @@ export function App() {
           </nav>
         </aside>
         <header className="mobile-header">
-          <Link to="/" className="wordmark"><LogoMark size={iconSize.display} /> Epilog</Link>
+          <Link to="/" className="wordmark"><LogoMark size={iconSize.xl} /> Epilog</Link>
           <div>
-            <NavLink to="/search" className="icon-button" aria-label="Search"><MagnifyingGlassIcon size={iconSize.lg} /></NavLink>
-            <NavLink to="/settings" className="icon-button" aria-label="Settings"><GearSixIcon size={iconSize.lg} /></NavLink>
+            <NavLink to="/search" className="icon-button" aria-label="Search"><MagnifyingGlassIcon size={iconSize.sm} /></NavLink>
+            <NavLink to="/settings" className="icon-button" aria-label="Settings"><GearSixIcon size={iconSize.sm} /></NavLink>
           </div>
         </header>
         <main id="main-content" className="main-content" tabIndex={-1} ref={main}>
@@ -224,15 +233,16 @@ export function App() {
                 animate="visible"
               >
                 {path === '/' ? <Dashboard entries={entries} onLog={openLog} />
-                  : path === '/library' ? <Library entries={entries} defaultStatus={defaultStatus} defaultCategory={defaultCategory} highlightId={highlightId} />
-                  : path === '/popular' ? <Popular entries={entries} query={query ?? ''} onLog={openLog} onPreference={savePreference} />
+                  : path === '/library' ? <Library entries={entries} view={browseParams.get('view')} defaultStatus={defaultStatus} defaultCategory={defaultCategory} highlightId={highlightId} />
+                  : path === '/popular' ? <Popular entries={entries} query={query ?? ''} onLog={openLog} onComplete={completeToday} onPreference={savePreference} />
                   : path === '/search' ? <Search entries={entries} onLog={(media, trigger) => openLog(media, trigger, browseParams.get('action') === 'watch' ? 'Completed' : undefined)} />
+                  : path === '/compare' ? <Compare entries={entries} onLog={openLog} />
                   : path === '/settings' ? <Settings theme={theme} onTheme={changeTheme} storageError={storageError} onRestore={(count) => announce(count ? 'Backup restored.' : 'Backup reviewed. Your library is already up to date.')} />
                   : <MissingPage />}
               </motion.div>
             ) : null}
             {detailId && state.status === 'ready' ? (
-              <motion.div key={detailId} className="page" variants={crossfade} initial={animate ? 'hidden' : false} animate="visible">
+              <motion.div key={detailId} className="page" variants={crossfade} initial={animate && !origin ? 'hidden' : false} animate="visible">
                 {detailPending ? <><h1 tabIndex={-1}>Loading title</h1><CatalogSkeleton /></> : detail ? (
                   <Details
                     media={detail}

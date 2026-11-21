@@ -16,9 +16,54 @@ export const sectionPaths = {
 
 export const queryLimit = 120
 export const searchResultLimit = 16
-export const popularPreviewSize = 8
+export const browsePreviewSize = 12
 export const maxCatalogPage = 500
 export const popularTitle = 'Popular This Week'
+export const defaultPopularCategory = discoverSections[0]
+
+export const browseModes = ['popular', 'rated', 'anticipated', 'release'] as const
+export type BrowseMode = (typeof browseModes)[number]
+export const browseLabels = {
+  popular: popularTitle,
+  rated: 'Highest Rated',
+  anticipated: 'Most Anticipated',
+  release: 'Release Date',
+} satisfies Record<BrowseMode, string>
+
+export const releaseDecades = [2020, 2010, 2000, 1990, 1980, 1970] as const
+export interface ReleasePeriod {
+  decade: (typeof releaseDecades)[number]
+  year?: number
+}
+
+export type DiscoverQuery = { mode: 'rated' } | { mode: 'anticipated' } | { mode: 'release'; period: ReleasePeriod }
+export type BrowseQuery = DiscoverQuery | { mode: 'popular' }
+export const defaultReleasePeriod: ReleasePeriod = { decade: releaseDecades[0] }
+const yearsPerDecade = 10
+
+export function parseReleasePeriod(decade: string | null, year: string | null): ReleasePeriod | undefined {
+  const start = releaseDecades.find((value) => String(value) === decade)
+  if (start === undefined) return
+  if (year === null) return { decade: start }
+  const selected = Number(year)
+  if (/^\d{4}$/.test(year) && selected >= start && selected < start + yearsPerDecade) return { decade: start, year: selected }
+}
+
+export function releaseYearRange({ decade, year }: ReleasePeriod) {
+  return { first: year ?? decade, last: year ?? decade + yearsPerDecade - 1 }
+}
+
+export function browseCatalogPath(category: DiscoverSection, query: BrowseQuery, page: number) {
+  const section = sectionPaths[category]
+  const pathname = query.mode === 'popular' ? `popular/${section}` : `discover/${query.mode}/${section}`
+  const params = new URLSearchParams()
+  if (query.mode === 'release') {
+    params.set('decade', String(query.period.decade))
+    if (query.period.year !== undefined) params.set('year', String(query.period.year))
+  }
+  if (page > 1) params.set('page', String(page))
+  return params.size ? `${pathname}?${params}` : pathname
+}
 
 export function cleanQuery(query: string) {
   return query.trim().replace(/\s+/g, ' ')

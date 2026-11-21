@@ -51,3 +51,19 @@ test('long unbroken titles wrap instead of overflowing at 320px', async ({ brows
   }
   await context.close()
 })
+
+test('fits three to six poster slots without wrapping the Dashboard shelf', async ({ page }) => {
+  await page.goto('/')
+  const posters = page.getByRole('list', { name: 'Popular This Week' })
+  for (const [width, columns] of [[320, 3], [390, 4], [768, 5], [1440, 6]]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect.poll(() => posters.evaluate((grid) => {
+      const style = getComputedStyle(grid)
+      const gap = Number.parseFloat(style.columnGap)
+      const contentWidth = grid.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight)
+      const cardWidth = grid.querySelector('li')!.getBoundingClientRect().width
+      return Math.floor((contentWidth + gap + 0.1) / (cardWidth + gap))
+    })).toBe(columns)
+    expect(await posters.evaluate((grid) => getComputedStyle(grid).gridTemplateRows.split(' ').length)).toBe(1)
+  }
+})

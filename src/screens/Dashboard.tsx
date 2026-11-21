@@ -1,36 +1,34 @@
-import { ArrowRightIcon, EyeIcon, MagnifyingGlassIcon } from '@phosphor-icons/react'
+import { ArrowRightIcon, MagnifyingGlassIcon } from '@phosphor-icons/react'
 import { useState } from 'react'
 import { Link } from 'react-router'
-import { usePopularTitles } from '../data/usePopularTitles'
-import { mediaKey, popularPreviewSize, popularTitle } from '../domain/catalog'
-import { categories, isWatchlisted, primaryCategory } from '../domain/media'
-import type { Category, LibraryEntry } from '../domain/media'
-import { CatalogSkeleton, PopularFeedback } from '../ui/CatalogFeedback'
+import { browseModes, defaultPopularCategory, defaultReleasePeriod, discoverSections, popularTitle } from '../domain/catalog'
+import type { BrowseQuery, DiscoverSection } from '../domain/catalog'
+import { isWatchlisted, primaryCategory } from '../domain/media'
+import type { LibraryEntry } from '../domain/media'
+import { BrowseShelf } from '../ui/BrowseShelf'
 import { CategoryPicker } from '../ui/CategoryPicker'
-import { PosterGrid, ProgressList } from '../ui/MediaCards'
+import { ProgressList } from '../ui/MediaCards'
 import type { OpenLog } from '../ui/MediaCards'
-import { popularPath } from '../ui/popular-navigation'
+import { ReleaseDatePicker } from '../ui/ReleaseDatePicker'
 import { iconSize } from '../ui/tokens'
 
 export function Dashboard({ entries, onLog }: {
   entries: ReadonlyMap<string, LibraryEntry>
   onLog: OpenLog
 }) {
-  const [category, setCategory] = useState<Category>('All')
-  const feed = usePopularTitles(category)
-  const popular = feed.items.slice(0, popularPreviewSize)
+  const [category, setCategory] = useState<DiscoverSection>(defaultPopularCategory)
+  const [period, setPeriod] = useState(defaultReleasePeriod)
   const recent = [...entries.values()].sort((a, b) => b.updatedAt - a.updatedAt)
   const inProgress = recent.filter((entry) => entry.status === 'In progress').slice(0, 3)
   const planned = recent.filter(isWatchlisted).slice(0, 3)
 
   return (
     <>
-      <header className="page-intro">
+      <header className="page-intro dashboard-intro">
         <div>
           <h1 tabIndex={-1}>Dashboard</h1>
           <p>{entries.size ? 'Pick up where you left off.' : 'Start your library with something you’ve watched or played.'}</p>
         </div>
-        <Link to="/search?action=watch" className="button button-primary"><EyeIcon size={iconSize.md} weight="bold" /> Watch</Link>
       </header>
 
       {inProgress.length ? (
@@ -48,23 +46,21 @@ export function Dashboard({ entries, onLog }: {
 
       {!entries.size ? (
         <Link className="search-prompt" to="/search">
-          <MagnifyingGlassIcon size={iconSize.xl} />
+          <MagnifyingGlassIcon size={iconSize.sm} />
           <span>Search movies, TV, anime, and games</span>
           <ArrowRightIcon size={iconSize.md} />
         </Link>
       ) : null}
 
-      <section className="shelf" aria-labelledby="popular-heading">
-        <div className="shelf-heading discover-heading">
-          <h2 id="popular-heading">{popularTitle}</h2>
-          <Link to={popularPath(category)} className="text-action">Browse popular titles <ArrowRightIcon size={iconSize.sm} /></Link>
-        </div>
-        <CategoryPicker value={category} options={categories} onChange={setCategory} label={popularTitle + ' categories'} />
-        <PopularFeedback {...feed} />
-        {popular.length ? <PosterGrid items={popular} entries={entries} shelf={popularTitle} onLog={onLog} titleLink={(media) => popularPath(category, mediaKey(media))} /> : null}
-        {feed.loading && !popular.length ? <CatalogSkeleton /> : null}
-        {!feed.loading && !popular.length ? <p className="muted discover-empty">No popular titles available.</p> : null}
-      </section>
+      {browseModes.map((mode) => {
+        const query: BrowseQuery = mode === 'release' ? { mode, period } : { mode }
+        return (
+          <BrowseShelf key={mode} category={category} query={query} entries={entries} onLog={onLog}>
+            {mode === 'popular' ? <CategoryPicker value={category} options={discoverSections} onChange={setCategory} label={popularTitle + ' categories'} /> : null}
+            {mode === 'release' ? <ReleaseDatePicker value={period} onChange={setPeriod} /> : null}
+          </BrowseShelf>
+        )
+      })}
 
       {recent.length ? (
         <section className="shelf" aria-labelledby="recent-heading">

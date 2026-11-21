@@ -66,9 +66,9 @@ export function BackupPanel({ onRestore }: { onRestore: (count: number) => void 
   }
 
   return (
-    <section aria-labelledby="backup-heading" className="settings-panel backup-panel" aria-busy={busy}>
-      <h2 id="backup-heading">Backup and restore</h2>
-      <p className="muted">Export your tracking history, likes, ratings, and watchlist to move your library to another browser. Catalog art and provider metadata stay out of the backup.</p>
+    <section aria-labelledby="backup-heading" className="settings-group backup-panel" aria-busy={busy}>
+      <h2 id="backup-heading">Backup</h2>
+      <p className="muted">Move your history, likes, ratings, and watchlist to another browser. Catalog art isn’t included.</p>
       <div className="action-row">
         <button type="button" className="button button-secondary" disabled={busy} onClick={download}>
           <DownloadSimpleIcon size={iconSize.md} /> Export backup

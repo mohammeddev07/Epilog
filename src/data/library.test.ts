@@ -70,6 +70,15 @@ describe('IndexedDB library', () => {
     expect(entries.get(film.id)?.completions).toEqual([event])
   })
 
+  it('completes a title once with the local date and retains game hours', async () => {
+    const store = open(undefined, () => new Date(2026, 10, 19, 23).getTime())
+    await store.save(game, { status: 'In progress', playtimeMinutes: 90 })
+    const results = await Promise.all([store.completeToday(game), store.completeToday(game)])
+    expect(results.map(({ changed }) => changed)).toEqual([true, false])
+    const entry = (await store.read()).get(game.id)
+    expect(entry).toMatchObject({ status: 'Completed', playtimeMinutes: 90, completions: [{ date: '2026-11-19' }] })
+  })
+
   it('rolls back a new entry when its completion ID conflicts with another title', async () => {
     const store = open()
     const completion = { id: 'shared-event', date: '2026-11-18' }
@@ -127,6 +136,19 @@ describe('IndexedDB library', () => {
     expect((await store.exportBackup()).entries).toEqual([])
     await store.save(anime, { status: 'Planned' })
     expect((await store.exportBackup()).entries[0].episodes).toEqual([])
+  })
+
+  it('marks a whole season watched or unwatched in one call', async () => {
+    const store = open()
+    await store.save(anime, { status: 'Planned' })
+    const season = [1, 2, 3].map((number) => manualEpisode({ season: 1, number }))
+    await store.setEpisode(anime.id, season, true)
+    const entry = (await store.read()).get(anime.id)!
+    expect(entry.status).toBe('In progress')
+    expect(entry.watched.map(({ number }) => number).sort()).toEqual([1, 2, 3])
+    await store.setEpisode(anime.id, season, false)
+    expect((await store.read()).get(anime.id)!.watched).toEqual([])
+    expect((await store.exportBackup()).entries[0].episodes).toHaveLength(3)
   })
 
   it('restores legacy series completions and retains episode overrides until another completion is logged', async () => {

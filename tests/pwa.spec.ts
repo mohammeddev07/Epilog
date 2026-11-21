@@ -44,6 +44,7 @@ test('has an installable manifest and saves episodes after an offline deep-link 
   await page.getByRole('button', { name: 'Save to library' }).click()
   await expect(page.getByRole('checkbox', { name: 'Watched First episode' })).toBeVisible()
   await page.getByRole('link', { name: 'Library', exact: true }).first().click()
+  await page.getByRole('navigation', { name: 'Library sections' }).getByRole('link', { name: /^Anime/ }).click()
   await page.getByRole('link', { name: /Moonlight Series/ }).click()
   await expect(page.getByRole('checkbox', { name: 'Watched First episode' })).toBeVisible()
   await context.setOffline(true)

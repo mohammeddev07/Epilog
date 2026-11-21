@@ -1,4 +1,5 @@
-import { maxCatalogPage, searchResultLimit } from '../src/domain/catalog'
+import { maxCatalogPage, releaseYearRange, searchResultLimit } from '../src/domain/catalog'
+import type { BrowseQuery } from '../src/domain/catalog'
 import { catalogKey } from '../src/domain/identity'
 import type { Media } from '../src/domain/media'
 import { CatalogFailure, Cooldown, externalId, nonnegativeInteger, plainText, providerJson, record, records, validYear } from './http'
@@ -11,7 +12,9 @@ export interface GameCredentials {
 
 const gameFields = 'fields name,summary,first_release_date,cover.image_id,genres.name,alternative_names.name;'
 const requestSpacing = 260
-const popularityPageSize = 32
+const browsePageSize = 32
+const minimumRatings = 10
+const secondsPerMillisecond = 1 / 1000
 
 function wait(duration: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, duration))
@@ -100,11 +103,37 @@ export class IgdbAdapter {
     return { items: output.flatMap((item) => gameMedia(item) ?? []) }
   }
 
-  async popular(config: GameCredentials, page: number) {
-    const offset = (page - 1) * popularityPageSize
+  async browse(config: GameCredentials, query: BrowseQuery, page: number) {
+    if (query.mode === 'popular') return this.popular(config, page)
+    const offset = (page - 1) * browsePageSize
+    let filters: string
+    switch (query.mode) {
+      case 'rated':
+        filters = `where total_rating_count >= ${minimumRatings}; sort total_rating desc;`
+        break
+      case 'anticipated': {
+        const today = new Date().toISOString().slice(0, 10)
+        const start = Date.parse(today) * secondsPerMillisecond
+        filters = `where first_release_date >= ${start} & hypes > 0; sort hypes desc;`
+        break
+      }
+      case 'release': {
+        const { first, last } = releaseYearRange(query.period)
+        const start = Date.UTC(first, 0, 1) * secondsPerMillisecond
+        const end = Date.UTC(last + 1, 0, 1) * secondsPerMillisecond
+        filters = `where first_release_date >= ${start} & first_release_date < ${end}; sort first_release_date desc;`
+        break
+      }
+    }
+    const results = await this.request(config, 'games', `${gameFields} ${filters} limit ${browsePageSize}; offset ${offset};`)
+    return { items: results.flatMap((item) => gameMedia(item) ?? []), hasMore: results.length === browsePageSize && page < maxCatalogPage }
+  }
+
+  private async popular(config: GameCredentials, page: number) {
+    const offset = (page - 1) * browsePageSize
     const results = await this.request(config, 'popularity_primitives',
-      `fields game_id; where popularity_type = 1; sort value desc; limit ${popularityPageSize}; offset ${offset};`)
-    const hasMore = results.length === popularityPageSize && page < maxCatalogPage
+      `fields game_id; where popularity_type = 1; sort value desc; limit ${browsePageSize}; offset ${offset};`)
+    const hasMore = results.length === browsePageSize && page < maxCatalogPage
     const ids = [...new Set(results.flatMap((item) => externalId(item.game_id) ?? []))]
     if (!ids.length) return { items: [], hasMore }
     const games = await this.request(config, 'games', `${gameFields} where id = (${ids.join(',')}); limit ${ids.length};`)

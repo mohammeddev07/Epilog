@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { cleanQuery, sectionPaths } from '../domain/catalog'
-import type { CatalogPayload, DiscoverSection, Provider } from '../domain/catalog'
+import { browseCatalogPath, cleanQuery } from '../domain/catalog'
+import type { BrowseQuery, CatalogPayload, DiscoverSection, Provider } from '../domain/catalog'
 import { catalogKey } from '../domain/identity'
 import type { CatalogIdentity } from '../domain/identity'
 import { CatalogResponseError, fetchCatalog, rememberPreview } from './catalog-client'
@@ -121,9 +121,10 @@ export function useProviderSearch(provider: Provider, rawQuery: string, retry: n
   return useResource(`search/${provider}`, provider, Boolean(query), 10 * minute, retry, query)
 }
 
-export function usePopularity(section: DiscoverSection, retry: number, enabled: boolean, page: number) {
-  const path = `popular/${sectionPaths[section]}${page > 1 ? `?page=${page}` : ''}`
-  return useResource(path, section === 'Games' ? 'igdb' : 'tmdb', enabled, 20 * minute, retry, undefined, 'weekly-v2')
+export function useBrowsePage(section: DiscoverSection, query: BrowseQuery, page: number, retry: number, enabled: boolean) {
+  const path = browseCatalogPath(section, query, page)
+  const cacheVersion = query.mode === 'popular' ? 'weekly-v2' : 'browse-v1'
+  return useResource(path, section === 'Games' ? 'igdb' : 'tmdb', enabled, 20 * minute, retry, undefined, cacheVersion)
 }
 
 export function useCatalogDetail(identity: CatalogIdentity | undefined, retry: number) {
@@ -150,4 +151,36 @@ export function useCatalogSeason(identity: CatalogIdentity | undefined, season: 
   const resource = useResource(`season/${encodeURIComponent(key)}/${season}`, 'tmdb', enabled, 30 * minute, retry)
   const episodes = resource.data && 'episodes' in resource.data ? resource.data.episodes : undefined
   return { ...resource, episodes }
+}
+
+const backfillLimit = 25
+
+/**
+ * Titles saved before runtimes were stored have no runtime, so Stats can't count their hours. While Stats is open
+ * and online, fetch their details one at a time and refresh the saved snapshot; the live library re-renders itself.
+ * Stops at the first failure (offline, rate limited) so it never hammers the catalog.
+ * ponytail: 25 titles per visit, sequential; batch on the Worker if libraries grow into the hundreds.
+ */
+export function useRuntimeBackfill(identities: readonly CatalogIdentity[]) {
+  const connected = useConnection()
+  const keys = identities.slice(0, backfillLimit).map(catalogKey).join(',')
+  const [done, setDone] = useState('')
+  useEffect(() => {
+    if (demoMode || !connected || !keys) return
+    const controller = new AbortController()
+    void (async () => {
+      for (const key of keys.split(',')) {
+        try {
+          const payload = await fetchCatalog(`detail/${encodeURIComponent(key)}`, key.startsWith('igdb') ? 'igdb' : 'tmdb', undefined, controller.signal)
+          const item = 'items' in payload ? payload.items[0] : undefined
+          if (item) await library.refreshSnapshot(item)
+        } catch {
+          break
+        }
+      }
+      if (!controller.signal.aborted) setDone(keys)
+    })()
+    return () => controller.abort()
+  }, [connected, keys])
+  return { working: !demoMode && connected && Boolean(keys) && done !== keys }
 }

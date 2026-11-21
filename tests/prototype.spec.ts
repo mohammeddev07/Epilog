@@ -12,7 +12,7 @@ async function assertAccessible(page: Page) {
 test('logs a film by keyboard, announces the save, and restores focus to the saved action', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Continue watching & playing' })).toHaveCount(0)
-  const add = page.getByRole('button', { name: 'Log The Last Signal' })
+  const add = page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Log The Last Signal' })
   await add.focus()
   await page.keyboard.press('Enter')
   const editor = page.getByRole('dialog', { name: 'Log a title' })
@@ -24,7 +24,7 @@ test('logs a film by keyboard, announces the save, and restores focus to the sav
   await editor.getByLabel('Watch date').fill('2026-11-15')
   await editor.getByRole('button', { name: 'Save to library' }).click()
   await expect(editor).toBeHidden()
-  const saved = page.getByRole('button', { name: 'Open saved entry for The Last Signal' })
+  const saved = page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Open saved entry for The Last Signal' })
   await expect(saved).toBeFocused()
   await expect(page.getByRole('status')).toHaveText('The Last Signal saved to Library.')
   await expect(page.getByRole('list', { name: 'Recently logged' })).toContainText('The Last Signal')
@@ -37,13 +37,14 @@ test('logs a film by keyboard, announces the save, and restores focus to the sav
 
 test('search keeps the same focused card after saving and supports editing game hours', async ({ page }) => {
   await page.goto('/')
-  await page.getByRole('link', { name: 'Watch', exact: true }).click()
+  await expect(page.getByRole('link', { name: 'Watch', exact: true })).toHaveCount(0)
+  await page.getByRole('link', { name: 'Search', exact: true }).click()
   const query = page.getByRole('searchbox', { name: 'Search catalog' })
   await expect(query).toBeFocused()
   await query.fill('Starlight')
   await page.getByRole('button', { name: 'Log Starlight Courier' }).click()
   const editor = page.getByRole('dialog')
-  await expect(editor.getByRole('radio', { name: 'Completed' })).toBeChecked()
+  await expect(editor.getByRole('radio', { name: 'Planned' })).toBeChecked()
   await editor.getByRole('radio', { name: 'In progress' }).check()
   await editor.getByLabel('Total hours').fill('-2')
   await editor.getByRole('button', { name: 'Save to library' }).click()
@@ -81,26 +82,25 @@ test('tracks both series formats and keeps one anime film entry across library f
     await expect(page.getByRole('status')).toHaveText(`${first} marked unwatched.`)
   }
   await page.getByRole('link', { name: 'Dashboard', exact: true }).click()
-  await page.getByRole('button', { name: 'Log Paper Moons' }).click()
+  await page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Log Paper Moons' }).click()
   await page.getByRole('button', { name: 'Save to library' }).click()
-  await page.getByRole('link', { name: 'Library', exact: true }).click()
   const grid = page.getByRole('list', { name: 'Library titles' })
-  await expect(grid.getByRole('link', { name: /Paper Moons/ })).toHaveCount(1)
-  await page.getByRole('button', { name: 'Movies', exact: true }).click()
-  await expect(grid.getByRole('link', { name: /Paper Moons/ })).toHaveCount(1)
-  await page.getByRole('button', { name: 'Anime', exact: true }).click()
-  await expect(grid.getByRole('link', { name: /Paper Moons/ })).toHaveCount(1)
+  for (const section of [/^Movies/, /^Anime/]) { // an anime film appears once in each
+    await page.getByRole('link', { name: 'Library', exact: true }).first().click()
+    await page.getByRole('navigation', { name: 'Library sections' }).getByRole('link', { name: section }).click()
+    await expect(grid.getByRole('link', { name: /Paper Moons/ })).toHaveCount(1)
+  }
 })
 
-test('provides a two-column phone gallery, a touch editor, and reflows with larger text', async ({ browser }) => {
+test('provides a single-row phone shelf and a touch editor at larger text sizes', async ({ browser }) => {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, reducedMotion: 'reduce',
   })
   const page = await context.newPage()
   await page.goto('/')
   const grid = page.getByRole('list', { name: 'Popular This Week', exact: true })
-  expect(await grid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(2)
-  await page.getByRole('button', { name: 'Log Paper Moons' }).tap()
+  expect(await grid.evaluate((element) => getComputedStyle(element).gridTemplateRows.split(' ').length)).toBe(1)
+  await page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Log Paper Moons' }).tap()
   const editor = page.getByRole('dialog')
   const bounds = await editor.boundingBox()
   expect(Math.round((bounds?.y ?? 0) + (bounds?.height ?? 0))).toBe(844)
@@ -108,7 +108,7 @@ test('provides a two-column phone gallery, a touch editor, and reflows with larg
   await page.getByRole('button', { name: 'Cancel' }).tap()
   await page.addStyleTag({ content: 'html { font-size: 200%; }' })
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
-  expect(await grid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(1)
+  expect(await grid.evaluate((element) => getComputedStyle(element).gridTemplateRows.split(' ').length)).toBe(1)
   await context.close()
 })
 
@@ -123,19 +123,20 @@ test('passes accessibility checks in light and dark and disables transitions on 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
   await page.getByRole('link', { name: 'Dashboard', exact: true }).click()
   await assertAccessible(page)
-  await page.getByRole('button', { name: 'Log Northbound' }).click()
+  await page.getByRole('button', { name: 'TV Shows', exact: true }).click()
+  await page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Log Northbound' }).click()
   const dialog = page.getByRole('dialog')
   expect(await dialog.evaluate((element) => getComputedStyle(element).transitionDuration)).toBe('0s')
   await assertAccessible(page)
   await page.keyboard.press('Escape')
-  await expect(page.getByRole('button', { name: 'Log Northbound' })).toBeFocused()
+  await expect(page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Log Northbound' })).toBeFocused()
 })
 
 test('fits the tablet layout and exposes the editor in the accessibility tree', async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 1180 })
   await page.goto('/')
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(820)
-  await page.getByRole('button', { name: 'Log Paper Moons' }).click()
+  await page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Log Paper Moons' }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog).toMatchAriaSnapshot(`
     - dialog "Log a title":

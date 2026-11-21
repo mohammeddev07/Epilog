@@ -39,7 +39,10 @@ function isMedia(value: unknown): value is Media {
     (value.aliases !== undefined && !strings(value.aliases)) ||
     (value.year !== undefined && (typeof value.year !== 'number' || !Number.isInteger(value.year))) ||
     (value.poster !== undefined && (typeof value.poster !== 'string' ||
-      !/^https:\/\/(image\.tmdb\.org|images\.igdb\.com)\//.test(value.poster)))) return false
+      !/^https:\/\/(image\.tmdb\.org|images\.igdb\.com)\//.test(value.poster))) ||
+    (value.runtime !== undefined && (typeof value.runtime !== 'number' || !Number.isInteger(value.runtime) || value.runtime < 1 || value.runtime > 1500)) ||
+    (value.countries !== undefined && (!strings(value.countries) || (value.countries as string[]).some((code) => !/^[A-Z]{2}$/.test(code)))) ||
+    (value.language !== undefined && (typeof value.language !== 'string' || !/^[a-z]{2,3}$/.test(value.language)))) return false
   const identity = parseCatalogKey(value.id)
   if (!identity || !isObject(value.identity) || value.identity.provider !== identity.provider ||
     value.identity.entity !== identity.entity || value.identity.id !== identity.id ||

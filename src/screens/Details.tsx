@@ -35,7 +35,7 @@ export function Details({ media, entry, back, triggerId, onLog, onEpisode, onRem
       )}
       <div className="detail-header">
         <Poster media={media} sharedId={triggerId} eager />
-        <div className="detail-copy">
+        <motion.div className="detail-copy" variants={rise} custom={2} initial={animate ? 'hidden' : false} animate="visible">
           <p className="title-kicker">{formatLabel(media)}{media.year ? ` · ${media.year}` : ''}</p>
           <h1 tabIndex={-1}>{media.title}</h1>
           {media.description ? <p>{media.description}</p> : null}
@@ -55,8 +55,9 @@ export function Details({ media, entry, back, triggerId, onLog, onEpisode, onRem
             <TrackingIcon size={iconSize.md} weight={entry?.status === 'Completed' ? 'fill' : 'regular'} />
             {trackingAction(media, entry)}
           </button>
-        </div>
+        </motion.div>
       </div>
+      <motion.div variants={rise} custom={3} initial={animate ? 'hidden' : false} animate="visible">
       {entry && media.format === 'SERIES' ? <EpisodeTracker entry={entry} episodes={episodes} onEpisode={onEpisode} /> : null}
       {entry ? (
         <section className="shelf detail-section" aria-labelledby="history-heading">
@@ -73,6 +74,7 @@ export function Details({ media, entry, back, triggerId, onLog, onEpisode, onRem
         </section>
       ) : null}
       {entry ? <RemoveEntry onRemove={() => onRemove(media)} /> : null}
+      </motion.div>
     </article>
   )
 }
