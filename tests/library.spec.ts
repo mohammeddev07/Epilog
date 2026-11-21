@@ -45,6 +45,25 @@ test('records and unmarks a manual anime episode while disconnected', async ({ p
   await expect(page.getByText('0 episodes watched', { exact: true })).toBeVisible()
 })
 
+test('marks a whole season watched in one click and can undo it', async ({ page }) => {
+  await page.goto('/title/northbound')
+  await page.getByRole('button', { name: 'Watch', exact: true }).click()
+  await page.getByRole('radio', { name: 'In progress' }).check()
+  await page.getByRole('button', { name: 'Save to library' }).click()
+  await page.getByRole('combobox', { name: 'Season' }).selectOption('1')
+  const episodes = ['Whiteout', 'The Beacon', 'Tree Line'].map((title) => page.getByRole('checkbox', { name: `Watched ${title}` }))
+  await page.getByRole('button', { name: 'Mark season 1 watched' }).click()
+  for (const episode of episodes) await expect(episode).toBeChecked()
+  await expect(page.getByRole('status').filter({ hasText: 'Season 1 marked watched.' })).toBeAttached()
+  await expect(page.getByText('3 of 5 episodes', { exact: true })).toBeVisible()
+  await page.reload()
+  await page.getByRole('combobox', { name: 'Season' }).selectOption('1')
+  await page.getByRole('button', { name: 'Mark season 1 unwatched' }).click()
+  for (const episode of episodes) await expect(episode).not.toBeChecked()
+  await page.getByRole('combobox', { name: 'Season' }).selectOption('2')
+  await expect(page.getByRole('button', { name: 'Mark season 2 watched' })).toBeVisible()
+})
+
 test('moves a backup to a fresh profile, previews repeats and conflicts, and rejects malformed files', async ({ page, browser }) => {
   await page.goto('/title/starlight-courier')
   await page.getByRole('button', { name: 'Play', exact: true }).click()
@@ -84,6 +103,7 @@ test('moves a backup to a fresh profile, previews repeats and conflicts, and rej
     await file.setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from('{') })
     await expect(target.getByRole('alert')).toContainText('not valid JSON')
     await target.getByRole('link', { name: 'Library', exact: true }).click()
+    await target.getByRole('navigation', { name: 'Library sections' }).getByRole('link', { name: /^Games/ }).click()
     await expect(target.getByRole('list', { name: 'Library titles' }).getByRole('link')).toHaveCount(1)
     await target.getByRole('link', { name: /Starlight Courier/ }).click()
     await expect(target.getByText('7.5 hr played')).toBeVisible()
@@ -93,19 +113,18 @@ test('moves a backup to a fresh profile, previews repeats and conflicts, and rej
   }
 })
 
-test('shows distinct watched and watchlist totals above the four Library categories', async ({ page }) => {
+test('lists Library sections that open filterable titles, and a stats page', async ({ page }) => {
   const rows = [
-    { id: 'the-last-signal', format: 'MOVIE', anime: false, status: 'Completed', completions: [
-      { id: 'first-watch', date: '2026-11-11' }, { id: 'second-watch', date: '2026-11-18' },
+    { id: 'the-last-signal', format: 'MOVIE', anime: false, status: 'Completed', createdAt: 3, rating: 4, completions: [
+      { id: 'first-watch', date: '2026-11-11' }, { id: 'second-watch', date: '2026-11-11' },
     ] },
-    { id: 'glass-tide', format: 'MOVIE', anime: false, status: 'Planned' },
-    { id: 'northbound', format: 'SERIES', anime: false, status: 'Completed' },
-    { id: 'lantern-season', format: 'SERIES', anime: true, status: 'Completed', watchlisted: true },
-    { id: 'starlight-courier', format: 'GAME', anime: false, status: 'Planned' },
+    { id: 'glass-tide', format: 'MOVIE', anime: false, status: 'Completed', createdAt: 5 },
+    { id: 'northbound', format: 'SERIES', anime: false, status: 'Planned', createdAt: 1 },
+    { id: 'starlight-courier', format: 'GAME', anime: false, status: 'In progress', createdAt: 1, playtimeMinutes: 450 },
   ]
-  const entries = rows.map(({ id, format, anime, status, watchlisted, completions }) => ({
-    media: { id, format, anime }, status, watchlisted, completions: completions ?? [],
-    episodes: [], createdAt: 1, updatedAt: 2,
+  const entries = rows.map(({ id, format, anime, status, completions, createdAt, rating, playtimeMinutes }) => ({
+    media: { id, format, anime }, status, completions: completions ?? [], episodes: [], createdAt, updatedAt: 6,
+    ...(rating ? { rating } : {}), ...(playtimeMinutes ? { playtimeMinutes } : {}),
   }))
   await page.goto('/settings')
   await page.getByLabel('Epilog backup file').setInputFiles({
@@ -114,26 +133,54 @@ test('shows distinct watched and watchlist totals above the four Library categor
   })
   await page.getByRole('button', { name: 'Restore backup', exact: true }).click()
   await page.getByRole('link', { name: 'Library', exact: true }).click()
-  const categoryTabs = page.getByRole('group', { name: 'Library categories' })
-  await expect(categoryTabs.getByRole('button')).toHaveText(['Movies', 'TV Shows', 'Anime', 'Games'])
-  const totals = page.locator('.library-totals')
-  await expect(totals.locator('dd')).toHaveText(['1', '1'])
+  const sections = page.getByRole('navigation', { name: 'Library sections' }).getByRole('link')
+  // Whole rows are links: section, finished count, watchlist, saved total.
+  await expect(sections).toHaveText([/^Movies2 watched2$/, /^TV shows0 watched, 1 on watchlist1$/, /^Games0 played1$/, /^Anime0 watched0$/, /^Stats/])
+
+  await sections.filter({ hasText: /^Movies/ }).click()
+  await expect(page).toHaveURL(/\/library\?category=Movies$/)
+  await expect(page.getByRole('heading', { level: 1, name: 'Movies' })).toBeFocused()
+  const grid = page.getByRole('list', { name: 'Library titles' })
+  // Filters live behind one Filter button; defaults count as no filter.
+  await page.getByRole('button', { name: 'Filter', exact: true }).click()
+  const filters = page.getByRole('dialog', { name: 'Filter and sort' })
+  await expect(filters.getByLabel('Status')).toBeFocused()
+  await expect(filters.getByLabel('Status')).toHaveValue('')
+  const sort = filters.getByRole('combobox', { name: 'Sort by' })
+  await expect(sort).toHaveValue('recent')
+  await sort.selectOption('added')
+  await expect(grid.getByRole('link')).toHaveText([/Glass Tide/, /The Last Signal/])
+  await sort.selectOption('year')
+  await expect(grid.getByRole('link')).toHaveText([/The Last Signal/, /Glass Tide/]) // 2025 before 2023
+  await filters.getByRole('button', { name: 'Done' }).click()
+  const filterButton = page.getByRole('button', { name: 'Filter, 1 active' })
+  await expect(filterButton).toBeFocused()
+  await filterButton.click()
+  await filters.getByRole('button', { name: 'Reset' }).click()
+  await expect(sort).toHaveValue('recent')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('button', { name: 'Filter', exact: true })).toBeFocused()
   const search = page.getByRole('searchbox', { name: 'Search library' })
   await search.fill('No matching title')
   await expect(page.getByRole('heading', { name: 'No matching titles' })).toBeVisible()
-  await expect(totals.locator('dd')).toHaveText(['1', '1'])
   await page.getByRole('button', { name: 'Clear search' }).click()
   await expect(search).toBeFocused()
+  await grid.getByRole('link', { name: /Glass Tide/ }).click()
+  await page.getByRole('button', { name: 'Back' }).click()
+  await expect(grid.getByRole('link', { name: /Glass Tide/ })).toBeFocused()
 
-  await categoryTabs.getByRole('button', { name: 'TV Shows' }).click()
-  await expect(totals.locator('dd')).toHaveText(['1', '0'])
-  const grid = page.getByRole('list', { name: 'Library titles' })
-  await expect(grid.getByRole('link')).toHaveCount(1)
-  await expect(grid.getByRole('link', { name: /Northbound/ })).toBeVisible()
-  await categoryTabs.getByRole('button', { name: 'Anime' }).click()
-  await expect(totals.locator('dd')).toHaveText(['1', '1'])
-  await expect(grid.getByRole('link', { name: /Lantern Season/ })).toBeVisible()
-  await categoryTabs.getByRole('button', { name: 'Games' }).click()
-  await expect(totals).toContainText('Played')
-  await expect(totals.locator('dd')).toHaveText(['0', '1'])
+  await page.getByRole('link', { name: 'Library', exact: true }).first().click()
+  await sections.filter({ hasText: /^Stats/ }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Stats' })).toBeFocused()
+  const figure = (label: string) => page.locator('.figures div').filter({ hasText: label }).locator('dd')
+  await expect(figure('Titles finished')).toHaveText('2')
+  await expect(figure('Hours watched and played')).toHaveText('13') // 118 min twice (rewatch) + 104 min + 7.5 hr played
+  await expect(figure('Title rewatched')).toHaveText('1')
+  await expect(figure('Average rating, out of 5')).toHaveText('4')
+  await expect(figure('Busiest month, 2 finished')).toHaveText('November 2026')
+  await expect(figure('Hours on your watchlist')).toHaveText('4.3') // Northbound: 5 episodes × 52 min
+  await expect(page.locator('.figures')).not.toContainText('Days with 2+')
+  await expect(page.getByRole('list', { name: 'Hours per game' }).or(page.getByRole('region', { name: 'Hours per game' }))).toContainText('Starlight Courier7.5 hr')
+  await expect(page.getByRole('region', { name: 'Countries' })).toContainText('United States')
+  await expect(page.getByRole('region', { name: 'Your ratings' })).toContainText('4 stars1')
 })

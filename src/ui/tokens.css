@@ -3,13 +3,13 @@
  *
  * Rules
  * - Components use semantic tokens (--text, --surface, --accent…), never primitives.
- * - Primitives (--paper-*, --night-*, --violet-*…) exist only to feed semantic tokens.
+ * - Primitives (--gray-*, --red-*, --green-*…) exist only to feed semantic tokens.
  * - Spacing is a 4px grid (--space-N = N × 4px). Fluid tokens clamp between grid steps.
  * - New UI should compose these; if a value is missing, add a token here, don't inline it.
  *
  * Rationale
- * - Colors are the existing brand palette (warm paper / cool night, violet accent), lifted into
- *   primitives. --success is new and AA-checked (6.4:1 light, 9.8:1 dark on --surface).
+ * - Colors are monochrome: black on white and white on black, one neutral scale. Poster art carries the
+ *   colour. --danger and --success are the only hues, kept for state.
  * - Type scale: the 18 sizes in use collapsed to their clusters (12/13/14/16px + fluid headings).
  * - Weights: Schibsted Grotesk is variable; the 13 weights in use clustered into 5 steps.
  * - Radii: kept the three established steps (rounded to 8/14/20px) plus 6px for thumbnails.
@@ -35,58 +35,51 @@
 :root {
   color-scheme: light dark;
 
-  /* ---- Primitives ---- */
+  /* ---- Primitives: one neutral scale. Artwork brings the colour; the interface stays black and white. ---- */
   --white: #fff;
-  --paper-0: #fffefa;
-  --paper-50: #f8f7f3;
-  --paper-100: #eeeae2;
-  --paper-150: #e8e4db;
-  --paper-200: #dedbd2;
-  --paper-500: #898578;
-  --paper-700: #616057;
-  --paper-900: #202019;
-  --night-50: #f3f1e9;
-  --night-300: #b9bbc5;
-  --night-500: #737688;
-  --night-700: #3b3d48;
-  --night-750: #333541;
-  --night-800: #2d313c;
-  --night-850: #1e2028;
-  --night-900: #1b1f2e;
-  --night-950: #15161b;
-  --night-990: #10131b;
-  --violet-50: #f2eafb;
-  --violet-300: #c9a6f2;
-  --violet-700: #6a2ea0;
-  --violet-800: #4a1f73;
-  --violet-900: #3b2a57;
-  --violet-950: #2a1245;
+  --black: #000;
+  --gray-50: #f5f5f5;
+  --gray-100: #ededed;
+  --gray-150: #e3e3e3;
+  --gray-400: #a3a3a3;
+  --gray-500: #8a8a8a;
+  --gray-550: #737373;
+  --gray-600: #6b6b6b;
+  --gray-750: #2e2e2e;
+  --gray-850: #1c1c1c;
+  --gray-900: #141414;
+  --gray-950: #0a0a0a;
   --red-300: #ffabaa;
   --red-700: #9f292a;
   --green-300: #9fd6aa;
   --green-700: #2b6a3c;
 
-  /* ---- Semantic colors ---- */
-  --bg: light-dark(var(--paper-50), var(--night-950));
-  --surface: light-dark(var(--paper-0), var(--night-850));
-  --hover: light-dark(var(--paper-100), var(--night-800));
-  --text: light-dark(var(--paper-900), var(--night-50));
-  --muted: light-dark(var(--paper-700), var(--night-300));
-  --line: light-dark(var(--paper-150), var(--night-750));
-  --edge: light-dark(var(--paper-200), var(--night-700));
-  --control-edge: light-dark(var(--paper-500), var(--night-500));
-  --accent: light-dark(var(--violet-700), var(--violet-300));
-  --accent-soft: light-dark(var(--violet-50), var(--violet-900));
-  --on-accent: light-dark(var(--white), var(--violet-950));
+  /* ---- Semantic colors: black on white (light), white on black (dark) ---- */
+  --bg: light-dark(var(--white), var(--black));
+  --surface: light-dark(var(--white), var(--gray-900));
+  --hover: light-dark(var(--gray-50), var(--gray-850));
+  --text: light-dark(var(--gray-950), var(--gray-50));
+  --muted: light-dark(var(--gray-600), var(--gray-400));        /* 5.3:1 on white, 8.0:1 on black */
+  --line: light-dark(var(--gray-100), var(--gray-850));
+  --edge: light-dark(var(--gray-150), var(--gray-750));
+  --control-edge: light-dark(var(--gray-500), var(--gray-550)); /* ≥3:1 where a border alone defines a control */
+  --accent: light-dark(var(--gray-950), var(--gray-50));       /* the primary action: a solid black (or white) pill */
+  --accent-soft: var(--hover);
+  --on-accent: light-dark(var(--white), var(--black));
   --focus: var(--accent);
   --danger: light-dark(var(--red-700), var(--red-300));
   --success: light-dark(var(--green-700), var(--green-300));
+  /* Chart marks: one neutral for single-series bars, ≥3:1 on both surfaces (dataviz validator, contrast check). */
+  --chart: light-dark(var(--gray-600), var(--gray-400));
   /* Controls drawn on top of poster art: same in both themes because the art is. */
-  --overlay: var(--night-900);
+  --overlay: var(--gray-900);
   --on-overlay: var(--white);
-  --overlay-halo: var(--violet-800);
-  --backdrop: color-mix(in srgb, var(--night-990) 62%, transparent);
-  --shimmer: light-dark(rgb(251 250 247 / 63%), rgb(255 255 255 / 9%));
+  --overlay-halo: var(--black);
+  --backdrop: color-mix(in srgb, var(--black) 55%, transparent);
+  --shimmer: light-dark(rgb(255 255 255 / 60%), rgb(255 255 255 / 9%));
+  /* Hairline drawn inside poster art so light and dark art keep a crisp edge on either theme. */
+  --ring: light-dark(rgb(0 0 0 / 8%), rgb(255 255 255 / 10%));
+  --overlay-soft: color-mix(in srgb, var(--gray-900) 78%, transparent);
 
   /* ---- Typography ---- */
   --font-sans: 'Schibsted Grotesk Variable', system-ui, sans-serif;
@@ -97,10 +90,14 @@
   --text-md: 1rem;       /* 16px — body */
   --text-lead: clamp(1rem, 1.5vw, 1.125rem);
   --text-brand: 1.75rem;
+  --text-brand-mobile: 1.5rem;
   --text-stat: clamp(1.5rem, 4vw, 2.5rem);
-  --text-h2: clamp(1.375rem, 2.6vw, 2rem);
-  --text-display-sm: clamp(1.625rem, 3.75vw, 2.75rem);
-  --text-h1: clamp(2.375rem, 5vw, 4.5rem);
+  --text-title: 1.25rem;   /* 20px — sheet titles, card-sized headings */
+  --text-h2: clamp(1.25rem, 2vw, 1.625rem);
+  --text-display-sm: clamp(1.625rem, 3vw, 2.25rem);
+  --text-h1: clamp(1.875rem, 3.2vw, 2.75rem);
+  --text-display: clamp(2rem, 4.4vw, 3.75rem); /* title details only: the one oversized head */
+  --text-figure: clamp(3.5rem, 9vw, 6rem); /* the compare screen's taste-match score */
   --weight-regular: 400;
   --weight-medium: 600;
   --weight-semibold: 680;
@@ -110,8 +107,8 @@
   --leading-tight: 1.05;
   --leading-snug: 1.2;
   --leading-normal: 1.6;
-  --tracking-display: -0.07em;
-  --tracking-heading: -0.05em;
+  --tracking-display: -0.045em;
+  --tracking-heading: -0.03em;
   --tracking-snug: -0.035em;
   --tracking-tight: -0.02em;
   --underline-offset: 0.2em;
@@ -138,6 +135,8 @@
   --size-control: 2.75rem;    /* 44px minimum touch target */
   --size-control-lg: 3.5rem;  /* 56px */
   --size-thumb: 2.75rem;      /* poster thumbnail width */
+  --size-poster-min: 4.375rem;
+  --size-poster-mark: 1.65rem;
   --size-checkbox: 1rem;
   --size-sidebar: 13.25rem;
   --size-dock: 4.5rem;        /* mobile bottom nav + gap; fixed UI sits above it */
@@ -148,16 +147,18 @@
   --radius-md: 0.875rem;
   --radius-lg: 1.25rem;
   --radius-full: 999px;
+  --radius-control: var(--radius-full); /* buttons, search and filter controls */
   --border-width: 1px;
   --border-width-thick: 2px;
   --focus-width: 3px;
   --focus-offset: 4px;
 
   /* ---- Elevation ---- */
-  --shadow-sm: 0 2px 8px rgb(5 8 19 / 22%);
-  --shadow-md: 0 8px 24px light-dark(rgb(46 36 15 / 9%), rgb(0 0 0 / 33%));
+  --shadow-sm: 0 2px 8px rgb(0 0 0 / 18%);
+  --shadow-md: 0 12px 32px light-dark(rgb(0 0 0 / 10%), rgb(0 0 0 / 50%));
   --z-below: -1;
   --z-raised: 1;
+  --z-flight: 5;  /* shared poster while it travels between Library and details */
   --z-dock: 10;
   --z-toast: 20;
   --z-banner: 30;

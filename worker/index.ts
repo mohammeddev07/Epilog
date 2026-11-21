@@ -1,5 +1,5 @@
-import { cleanQuery, discoverSections, maxCatalogPage, queryLimit, sectionPaths } from '../src/domain/catalog'
-import type { CatalogItems } from '../src/domain/catalog'
+import { browseCatalogPath, cleanQuery, discoverSections, maxCatalogPage, parseReleasePeriod, queryLimit, sectionPaths } from '../src/domain/catalog'
+import type { BrowseQuery, CatalogItems } from '../src/domain/catalog'
 import { parseCatalogKey } from '../src/domain/identity'
 import { CatalogFailure, readJson, record } from './http'
 import type { FetchProvider } from './http'
@@ -29,6 +29,22 @@ const errors = {
 } as const
 
 type Shelf = CatalogItems
+
+function readBrowse(mode: string | undefined, params: URLSearchParams): { query: BrowseQuery; page: number } {
+  const allowed = mode === 'release' ? ['page', 'decade', 'year'] : ['page']
+  const keys = new Set(params.keys())
+  if (keys.size !== params.size || [...keys].some((key) => !allowed.includes(key))) throw new CatalogFailure(400)
+  const rawPage = params.get('page') ?? '1'
+  const page = Number(rawPage)
+  if (!/^[1-9]\d{0,2}$/.test(rawPage) || page > maxCatalogPage) throw new CatalogFailure(400)
+  if (mode === 'release') {
+    const period = parseReleasePeriod(params.get('decade'), params.get('year'))
+    if (!period) throw new CatalogFailure(400)
+    return { query: { mode, period }, page }
+  }
+  if (mode === 'popular' || mode === 'rated' || mode === 'anticipated') return { query: { mode }, page }
+  throw new CatalogFailure(404)
+}
 
 export function createCatalogWorker(fetcher: FetchProvider = (input, init) => fetch(input, init)) {
   const tmdb = new TmdbAdapter(fetcher)
@@ -65,18 +81,18 @@ export function createCatalogWorker(fetcher: FetchProvider = (input, init) => fe
           return Response.json(result, { headers: responseHeaders })
         }
 
-        if (action === 'popular' && path.length === 2) {
-          const category = discoverSections.find((item) => sectionPaths[item] === key)
+        if ((action === 'popular' && path.length === 2) || (action === 'discover' && path.length === 3)) {
+          const section = action === 'popular' ? key : segment
+          const category = discoverSections.find((item) => sectionPaths[item] === section)
           if (!category) throw new CatalogFailure(404)
-          const rawPage = url.searchParams.get('page') ?? '1'
-          const page = Number(rawPage)
-          if (!/^[1-9]\d{0,2}$/.test(rawPage) || page > maxCatalogPage || url.searchParams.size > Number(url.searchParams.has('page'))) {
-            throw new CatalogFailure(400)
-          }
-          const cacheKey = `${category}:${page}`
+          if (action === 'discover' && key === 'popular') throw new CatalogFailure(404)
+          const { query, page } = readBrowse(action === 'popular' ? action : key, url.searchParams)
+          const cacheKey = browseCatalogPath(category, query, page)
           const cached = shelves.get(cacheKey)
           if (cached && cached.until > Date.now()) return Response.json(cached.value, { headers: responseHeaders })
-          const value: Shelf = category === 'Games' ? await igdb.popular(credentials, page) : await tmdb.popular(env.TMDB_READ_ACCESS_TOKEN, category, page)
+          const value: Shelf = category === 'Games'
+            ? await igdb.browse(credentials, query, page)
+            : await tmdb.browse(env.TMDB_READ_ACCESS_TOKEN, category, query, page)
           if (!value.partial) {
             shelves.delete(cacheKey)
             const oldest = shelves.keys().next().value

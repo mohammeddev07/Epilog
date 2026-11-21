@@ -1,13 +1,13 @@
 import { CheckIcon, FilmSlateIcon, GameControllerIcon, PlusIcon, TelevisionIcon } from '@phosphor-icons/react'
 import { AnimatePresence, motion, useIsPresent } from 'motion/react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ComponentProps } from 'react'
 import { Link } from 'react-router'
 import { mediaKey } from '../domain/catalog'
 import { formatLabel, progressText } from '../domain/media'
 import type { LibraryEntry, Media, Status } from '../domain/media'
 import { titlePath, useOpenDetail } from './detail-navigation'
-import { layoutSpring, rise, useMotionEnabled } from './motion'
+import { layoutSpring, posterSpring, rise, useMotionEnabled } from './motion'
 import { iconSize } from './tokens'
 
 export type OpenLog = (media: Media, trigger: HTMLElement, initialStatus?: Status) => void
@@ -15,12 +15,29 @@ export type OpenLog = (media: Media, trigger: HTMLElement, initialStatus?: Statu
 export function Poster({ media, sharedId, eager = false }: { media: Media; sharedId?: string; eager?: boolean }) {
   const [failedSource, setFailedSource] = useState<string>()
   const [loadedSource, setLoadedSource] = useState<string>()
+  const [flying, setFlying] = useState(false)
+  // Motion skips onLayoutAnimationComplete when a flight is interrupted (rapid open/close), so drop the raise anyway.
+  // ponytail: fixed 1s cap (flight settles in ~0.45s); a restarted flight can lose its raise near the cap.
+  useEffect(() => {
+    if (!flying) return
+    const timer = window.setTimeout(() => setFlying(false), 1000)
+    return () => window.clearTimeout(timer)
+  }, [flying])
   const animate = useMotionEnabled()
   const Fallback = media.format === 'GAME' ? GameControllerIcon : media.format === 'SERIES' ? TelevisionIcon : FilmSlateIcon
   const loading = Boolean(media.poster && media.poster !== loadedSource && media.poster !== failedSource)
 
   return (
-    <motion.div className="poster-art" data-loading={loading || undefined} layoutId={animate ? sharedId : undefined} transition={layoutSpring}>
+    <motion.div
+      className="poster-art"
+      data-loading={loading || undefined}
+      data-flying={flying || undefined}
+      layoutId={animate ? sharedId : undefined}
+      layoutCrossfade={false} // the source poster is hidden; a crossfade would only ghost the flying one
+      transition={posterSpring}
+      onLayoutAnimationStart={() => setFlying(true)}
+      onLayoutAnimationComplete={() => setFlying(false)}
+    >
       {media.poster && failedSource !== media.poster ? (
         <img
           src={media.poster}
@@ -35,7 +52,10 @@ export function Poster({ media, sharedId, eager = false }: { media: Media; share
           onError={() => setFailedSource(media.poster)}
         />
       ) : (
-        <span className="poster-placeholder" aria-hidden="true"><Fallback size={iconSize.poster} weight="thin" /></span>
+        <span className="poster-placeholder" aria-hidden="true">
+          <Fallback size={iconSize.poster} weight="thin" />
+          <span className="poster-placeholder-title">{media.title}</span>
+        </span>
       )}
     </motion.div>
   )
@@ -94,7 +114,21 @@ export function PosterGrid({ items, entries, shelf, onLog, titleLink, highlightI
           const entry = entries.get(media.id) ?? byKey.get(key)
           const id = `${shelf}-${key}`.replaceAll(' ', '-').toLowerCase()
           const content = <>
-            <Poster media={media} sharedId={id} eager={index < 6} />
+            <span className="poster-frame">
+              <Poster media={media} sharedId={id} eager={index < 6} />
+              {entry?.status ? (
+                <motion.span
+                  key={entry.status}
+                  initial={animate ? 'hidden' : false}
+                  animate="visible"
+                  variants={rise}
+                  className="status-label"
+                  data-status={entry.status}
+                >
+                  {entry.status}
+                </motion.span>
+              ) : null}
+            </span>
             <span className="poster-title">{media.title}</span>
             <span className="poster-meta">{formatLabel(media)}{media.year ? ` · ${media.year}` : ''}</span>
           </>
@@ -132,21 +166,9 @@ export function PosterGrid({ items, entries, shelf, onLog, titleLink, highlightI
                     animate="visible"
                     aria-hidden="true"
                   >
-                    {entry ? <CheckIcon size={iconSize.lg} weight="bold" /> : <PlusIcon size={iconSize.lg} weight="bold" />}
+                    {entry ? <CheckIcon size={iconSize.compact} weight="bold" /> : <PlusIcon size={iconSize.compact} weight="bold" />}
                   </motion.span>
                 </button>
-              ) : null}
-              {entry?.status ? (
-                <motion.span
-                  key={entry.status}
-                  initial={animate ? 'hidden' : false}
-                  animate="visible"
-                  variants={rise}
-                  className="status-label"
-                  data-status={entry.status}
-                >
-                  {entry.status}
-                </motion.span>
               ) : null}
             </AnimatedListItem>
           )

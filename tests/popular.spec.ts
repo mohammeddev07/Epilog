@@ -2,9 +2,11 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 
 test('starts on the selected poster and persists the four quick actions', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-11-19T12:00:00'))
   await page.goto('/')
   await page.getByRole('list', { name: 'Popular This Week' }).getByRole('link', { name: /The Last Signal/ }).click()
   await expect(page.getByRole('heading', { name: 'Popular This Week' })).toBeFocused()
+  await expect(page.getByRole('heading', { name: 'Popular This Week' })).toHaveClass('sr-only')
   await expect(page.getByRole('heading', { name: 'The Last Signal' })).toBeVisible()
   await expect(page.getByText(/2025 · Movie/)).toBeVisible()
   const like = page.getByRole('button', { name: 'Like', exact: true })
@@ -24,19 +26,55 @@ test('starts on the selected poster and persists the four quick actions', async 
 
   await page.getByRole('button', { name: 'Watch', exact: true }).click()
   const editor = page.getByRole('dialog')
-  await expect(editor.getByRole('radio', { name: 'Completed' })).toBeChecked()
-  await editor.getByLabel('Watch date').fill('2026-11-19')
-  await editor.getByRole('button', { name: 'Save changes' }).click()
-  await expect(page.getByRole('button', { name: 'Watched', exact: true })).toBeFocused()
+  const watched = page.getByRole('button', { name: 'Watched', exact: true })
+  await expect(watched).toBeFocused()
+  await expect(editor).toBeHidden()
+  await watched.click()
+  await expect(editor).toBeHidden()
   await expect(watchlist).toHaveAttribute('aria-pressed', 'true')
+  await page.getByRole('link', { name: 'The Last Signal', exact: true }).click()
+  await expect(page.locator('.history-list time')).toHaveCount(1)
+  await expect(page.locator('.history-list time')).toHaveAttribute('datetime', '2026-11-19')
+  await page.getByRole('button', { name: 'Back', exact: true }).click()
 
   await page.reload()
   await expect(page.getByRole('button', { name: 'Watched', exact: true })).toBeVisible()
   await expect(like).toHaveAttribute('aria-pressed', 'true')
   await expect(rate).toHaveText('4/5')
   await page.getByRole('link', { name: 'Library', exact: true }).click()
-  await page.getByLabel('Status filter').selectOption('Watchlist')
+  await page.getByRole('navigation', { name: 'Library sections' }).getByRole('link', { name: /^Movies/ }).click()
+  await page.getByRole('button', { name: 'Filter', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Filter and sort' }).getByLabel('Status').selectOption('Watchlist')
+  await page.getByRole('button', { name: 'Done' }).click()
   await expect(page.getByRole('list', { name: 'Library titles' })).toContainText('The Last Signal')
+})
+
+test('holding Watch opens the editor and saves only the date chosen there', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  try {
+    const page = await context.newPage()
+    await page.goto('http://127.0.0.1:4176/popular')
+    const watch = page.getByRole('button', { name: 'Watch', exact: true })
+    await watch.scrollIntoViewIfNeeded()
+    const bounds = (await watch.boundingBox())!
+    const cdp = await context.newCDPSession(page)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }] })
+    const editor = page.getByRole('dialog', { name: 'Log a title' })
+    await expect(editor).toBeVisible()
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await editor.getByLabel('Watch date').fill('2026-11-15')
+    await editor.getByRole('button', { name: 'Save to library' }).click()
+    const watched = page.getByRole('button', { name: 'Watched', exact: true })
+    await expect(watched).toBeFocused()
+    await watched.press('Shift+Enter')
+    await expect(page.getByRole('dialog', { name: 'Edit library entry' })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await page.getByRole('link', { name: 'The Last Signal', exact: true }).click()
+    await expect(page.locator('.history-list time')).toHaveCount(1)
+    await expect(page.locator('.history-list time')).toHaveAttribute('datetime', '2026-11-15')
+  } finally {
+    await context.close()
+  }
 })
 
 test('browses by a real touch swipe and by keyboard with reduced motion', async ({ browser }) => {
@@ -44,8 +82,9 @@ test('browses by a real touch swipe and by keyboard with reduced motion', async 
     viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, reducedMotion: 'reduce', colorScheme: 'dark',
   })
   const page = await context.newPage()
-  await page.goto('http://127.0.0.1:4176/popular')
+  await page.goto('http://127.0.0.1:4176/popular?category=All')
   const carousel = page.getByRole('region', { name: 'Popular titles' })
+  await expect(carousel.locator('.popular-film-heading p')).toContainText('Movie') // unknown category falls back to Movies
   const stage = carousel.getByRole('group', { name: /Poster/ })
   const initial = await carousel.getByRole('heading').textContent()
   const box = (await stage.boundingBox())!

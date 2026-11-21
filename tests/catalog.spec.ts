@@ -82,9 +82,11 @@ test('ignores superseded searches and keeps a distinct game in the unified resul
   await expect(page.getByRole('link', { name: /Obsolete result/ })).toHaveCount(0)
 })
 
-test('deduplicates cross-listed Discover titles, preserves saved identities, and labels an unavailable category', async ({ page }) => {
+test('shows four Discover categories and preserves saved identities across them', async ({ page }) => {
+  const requested: string[] = []
   await page.route('**/api/catalog/popular/*', async (route) => {
-    const suffix = route.request().url().split('/').at(-1)
+    const suffix = new URL(route.request().url()).pathname.split('/').at(-1)!
+    requested.push(suffix)
     if (suffix === 'games') {
       await route.fulfill({ status: 503, json: { error: 'provider_unavailable' } })
       return
@@ -95,9 +97,18 @@ test('deduplicates cross-listed Discover titles, preserves saved identities, and
   await page.goto('/')
   const shelf = page.getByRole('list', { name: 'Popular This Week', exact: true })
   await expect(shelf.getByRole('link', { name: /Moon Lantern/ })).toHaveCount(1)
-  await expect(page.getByText('Games catalog is unavailable. Try again.')).toBeVisible()
+  const categories = page.getByRole('group', { name: 'Popular This Week categories' })
+  const options = ['Movies', 'TV Shows', 'Anime', 'Games']
+  await expect(categories.getByRole('button')).toHaveText(options)
+  await expect(categories.getByRole('button', { name: 'Movies' })).toHaveAttribute('aria-pressed', 'true')
+  expect(requested).toEqual(['movies'])
+  await categories.getByRole('button', { name: 'Games' }).click()
+  await expect(page.getByRole('region', { name: 'Popular This Week', exact: true }).getByText('Games catalog is unavailable. Try again.')).toBeVisible()
+  await categories.getByRole('button', { name: 'Anime' }).click()
   await shelf.getByRole('link', { name: /Moon Lantern/ }).click()
   await expect(page.getByRole('heading', { name: 'Moon Lantern' })).toBeVisible()
+  await expect(page).toHaveURL(/category=Anime/) // the carousel opens in the Dashboard's category and has no picker of its own
+  await expect(categories).toHaveCount(0)
   await page.getByRole('button', { name: 'Watchlist', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Watchlist', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await page.getByRole('link', { name: 'Moon Lantern', exact: true }).click()
@@ -108,13 +119,12 @@ test('deduplicates cross-listed Discover titles, preserves saved identities, and
   await expect(page.getByRole('link', { name: 'Moon Lantern', exact: true })).toBeFocused()
   await page.getByRole('link', { name: 'Back to Dashboard' }).click()
   await expect(page.getByRole('button', { name: 'Open saved entry for Moon Lantern' })).toBeVisible()
-  await page.getByRole('link', { name: 'Library', exact: true }).click()
   const grid = page.getByRole('list', { name: 'Library titles' })
-  await expect(grid.getByRole('link')).toHaveCount(1)
-  await page.getByRole('button', { name: 'Movies', exact: true }).click()
-  await expect(grid.getByRole('link')).toHaveCount(1)
-  await page.getByRole('button', { name: 'Anime', exact: true }).click()
-  await expect(grid.getByRole('link')).toHaveCount(1)
+  for (const section of [/^Movies/, /^Anime/]) { // an anime film appears once in each
+    await page.getByRole('link', { name: 'Library', exact: true }).first().click()
+    await page.getByRole('navigation', { name: 'Library sections' }).getByRole('link', { name: section }).click()
+    await expect(grid.getByRole('link')).toHaveCount(1)
+  }
 })
 
 test('prefetches more titles past 32 and retains the swiped poster across details', async ({ page }) => {
@@ -172,12 +182,11 @@ test('completing a series from Popular checks episodes in every season as detail
       : [{ season: 2, number: 1, title: 'Second light', airDate: '2026-11-12' },
         { season: 2, number: 2, title: 'Upcoming finale', airDate: '2026-12-01' }] },
   }))
+  await page.clock.setFixedTime(new Date('2026-11-18T12:00:00'))
   await page.goto('/popular?category=TV+Shows')
   await page.getByRole('button', { name: 'Watch', exact: true }).click()
-  const editor = page.getByRole('dialog')
-  await editor.getByLabel('Completion date').fill('2026-11-18')
-  await editor.getByRole('button', { name: 'Save to library' }).click()
   await expect(page.getByRole('button', { name: 'Watched', exact: true })).toBeVisible()
+  await expect(page.getByRole('dialog')).toBeHidden()
   await page.getByRole('link', { name: 'North Star', exact: true }).click()
   await expect(page.getByRole('checkbox', { name: 'Watched First light' })).toBeChecked()
   await expect(page.getByText(/Next up ·/)).toHaveCount(0)
@@ -193,4 +202,59 @@ test('completing a series from Popular checks episodes in every season as detail
   await season.selectOption('2')
   await expect(secondLight).not.toBeChecked()
   await expect(page.locator('.history-list time')).toHaveAttribute('datetime', '2026-11-18')
+})
+
+test('browses the new Dashboard shelves by category, decade and year', async ({ page }) => {
+  const requested = new Set<string>()
+  const releases = [
+    { ...moon, title: 'Decade premiere', year: 2010 },
+    { ...moon, id: 'tmdb:movie:43', identity: { ...moon.identity, id: '43' }, title: 'Late decade premiere', year: 2019 },
+  ]
+  await page.route((url) => url.pathname.startsWith('/api/catalog/popular/'), (route) => route.fulfill({ json: { items: [moon] } }))
+  await page.route((url) => url.pathname.startsWith('/api/catalog/discover/'), (route) => {
+    const url = new URL(route.request().url())
+    const year = url.searchParams.get('year')
+    const decade = url.searchParams.get('decade')
+    requested.add(url.pathname + url.search)
+    const items = url.pathname.endsWith('/games') ? [game]
+      : url.pathname.includes('/release/') ? (decade === '2010' ? releases.filter((item) => !year || String(item.year) === year) : [])
+        : [{ ...moon, title: url.pathname.includes('/rated/') ? 'Top rated movie' : 'Upcoming movie' }]
+    return route.fulfill({ json: { items, hasMore: false } })
+  })
+  await page.goto('/')
+  for (const heading of ['Popular This Week', 'Highest Rated', 'Most Anticipated', 'Release Date']) {
+    await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible()
+  }
+  const rated = page.getByRole('region', { name: 'Highest Rated', exact: true })
+  await rated.scrollIntoViewIfNeeded()
+  await expect(rated.getByRole('link', { name: /Top rated movie/ })).toBeVisible()
+  const anticipated = page.getByRole('region', { name: 'Most Anticipated', exact: true })
+  await anticipated.scrollIntoViewIfNeeded()
+  await expect(anticipated.getByRole('link', { name: /Upcoming movie/ })).toBeVisible()
+
+  const filter = page.getByRole('group', { name: 'Release date filters' })
+  const decade = filter.getByRole('combobox', { name: 'Decade' })
+  const year = filter.getByRole('combobox', { name: 'Year' })
+  await expect(decade.locator('option')).toHaveText(['2020s', '2010s', '2000s', '1990s', '1980s', '1970s'])
+  await expect(year.locator('option')).toHaveText(['Any year', ...Array.from({ length: 10 }, (_, index) => String(2020 + index))])
+  await decade.selectOption('2010')
+  const release = page.getByRole('list', { name: 'Release Date', exact: true })
+  await expect(year).toHaveValue('')
+  await expect(release.getByRole('link')).toHaveCount(2)
+  await year.selectOption('2019')
+  await expect(release.getByRole('link')).toHaveCount(1)
+  await release.getByRole('link', { name: /Late decade premiere/ }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Release Date' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Late decade premiere' })).toBeVisible()
+  expect(requested.has('/api/catalog/discover/release/movies?decade=2010')).toBe(true)
+  expect(requested.has('/api/catalog/discover/release/movies?decade=2010&year=2019')).toBe(true)
+
+  // The carousel has no switchers of its own: category and collection are chosen on the Dashboard.
+  await expect(page.getByRole('group', { name: /categories|Browse collections|Release date filters/ })).toHaveCount(0)
+  await page.getByRole('link', { name: 'Back to Dashboard' }).click()
+  await page.getByRole('group', { name: 'Popular This Week categories' }).getByRole('button', { name: 'Games' }).click()
+  await page.getByRole('link', { name: 'Browse Most Anticipated' }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Most Anticipated' })).toBeAttached()
+  await expect(page.getByRole('heading', { name: game.title })).toBeVisible()
+  expect(requested.has('/api/catalog/discover/anticipated/games')).toBe(true)
 })

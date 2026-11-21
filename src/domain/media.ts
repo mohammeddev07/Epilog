@@ -46,6 +46,9 @@ interface MediaFields {
   aliases?: readonly string[]
   identity?: CatalogIdentity
   catalogedAt?: number
+  runtime?: number // minutes: a film's length, or a typical episode for a series
+  countries?: readonly string[] // ISO 3166-1 alpha-2
+  language?: string // ISO 639-1 original language
 }
 
 export type Media = MediaFields & (
@@ -66,6 +69,7 @@ export interface LibraryEntry extends TitlePreferences {
   playtimeMinutes?: number
   watched: readonly Episode[]
   unwatched: readonly EpisodePosition[]
+  createdAt?: number // date added; optional for entries built before it was exposed
   updatedAt: number
   label?: string
 }

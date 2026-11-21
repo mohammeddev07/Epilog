@@ -1,16 +1,16 @@
 import { LayoutGroup, motion } from 'motion/react'
 import { useId } from 'react'
-import type { Category } from '../domain/media'
 import { duration, easeOut, useMotionEnabled } from './motion'
 
-interface Props<T extends Category> {
+interface Props<T extends string> {
   value: T
   options: readonly T[]
   onChange: (category: T) => void
   label: string
+  getLabel?: (option: T) => string
 }
 
-export function CategoryPicker<T extends Category>({ value, options, onChange, label }: Props<T>) {
+export function CategoryPicker<T extends string>({ value, options, onChange, label, getLabel }: Props<T>) {
   const groupId = useId()
   const animate = useMotionEnabled()
 
@@ -27,7 +27,7 @@ export function CategoryPicker<T extends Category>({ value, options, onChange, l
                 aria-hidden="true"
               />
             ) : null}
-            <span>{category}</span>
+            <span>{getLabel ? getLabel(category) : category}</span>
           </button>
         ))}
       </LayoutGroup>

@@ -1,5 +1,6 @@
 // Icon sizes in px (Phosphor takes a numeric size). Visual tokens otherwise live in tokens.css.
 export const iconSize = {
+  compact: 16, // quick actions on compact poster cards
   sm: 18, // inline with small/secondary text and text actions
   md: 20, // default: buttons, inputs
   lg: 22, // navigation and header icon buttons

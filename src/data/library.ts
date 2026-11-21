@@ -4,7 +4,7 @@ import { buildBackup, planRestore } from '../domain/backup'
 import type { Backup, BackupEntry, EpisodeActivity, OwnedMedia, RestorePreview } from '../domain/backup'
 import type { CatalogPayload, Provider } from '../domain/catalog'
 import { catalogCacheAge, catalogKey, parseCatalogKey } from '../domain/identity'
-import { episodeKey, manualEpisode, updateEntry, updateEpisode, updatePreference } from '../domain/media'
+import { episodeKey, localDate, manualEpisode, updateEntry, updateEpisode, updatePreference } from '../domain/media'
 import type { Completion, Episode, LibraryEntry, LogDraft, Media, PreferenceChange, TitlePreferences } from '../domain/media'
 import { demoById } from './demo'
 
@@ -84,6 +84,7 @@ function libraryEntry(entry: BackupEntry, snapshot?: Media): LibraryEntry {
     watchlisted: entry.watchlisted,
     label: entry.media.label,
     playtimeMinutes: entry.playtimeMinutes,
+    createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
     watched: entry.episodes.filter(({ watched }) => watched).map(({ season, number }) => {
       const position = { season, number }
@@ -161,7 +162,9 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
       const owned = existing ?? await db.media.get(id) ?? { id, format: media.format, anime: Boolean(media.anime) }
       const stored = await storedEntry(id, owned)
       const updatedAt = Math.max(now, stored?.updatedAt ?? 0)
-      const entry = update(stored ? libraryEntry(stored, media) : undefined, updatedAt)
+      const current = stored ? libraryEntry(stored, media) : undefined
+      const entry = update(current, updatedAt)
+      if (entry === current) return { id, created: false, changed: false }
       await db.media.put({ id, format: owned.format, anime: owned.anime, label: entry.label })
       await db.entries.put({
         mediaId: id,
@@ -189,7 +192,7 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
         const expiresAt = catalogedAt + catalogCacheAge(media.identity.provider)
         if (expiresAt > now) await db.catalog.put({ key, mediaId: id, media, expiresAt })
       }
-      return { id, created: !stored }
+      return { id, created: !stored, changed: true }
     })
   }
 
@@ -197,18 +200,27 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
     return writeEntry(media, (current, now) => updateEntry(media, current, draft, now))
   }
 
+  function completeToday(media: Media) {
+    const completion = { id: crypto.randomUUID(), date: localDate(new Date(clock())) }
+    return writeEntry(media, (current, now) => current?.status === 'Completed' ? current : updateEntry(media, current, {
+      status: 'Completed', completion, playtimeMinutes: current?.playtimeMinutes,
+    }, now))
+  }
+
   function savePreference(media: Media, change: PreferenceChange) {
     return writeEntry(media, (current, now) => updatePreference(media, current, change, now))
   }
 
-  async function setEpisode(mediaId: string, episode: Episode, watched: boolean) {
+  /** One episode or a whole season, saved in a single transaction. */
+  async function setEpisode(mediaId: string, episode: Episode | readonly Episode[], watched: boolean) {
+    const episodes = [episode].flat()
     return db.transaction('rw', [...records, db.catalog], async () => {
       const media = await db.media.get(mediaId)
       const current = media ? await storedEntry(mediaId, media) : undefined
       if (!current) throw new Error('This title is no longer in the library.')
       const now = Math.max(clock(), current.updatedAt)
-      const updated = updateEpisode(libraryEntry(current), episode, watched, now)
-      await db.episodes.put({ mediaId, season: episode.season, number: episode.number, watched, updatedAt: now })
+      const updated = episodes.reduce((entry, item) => updateEpisode(entry, item, watched, now), libraryEntry(current))
+      await db.episodes.bulkPut(episodes.map(({ season, number }) => ({ mediaId, season, number, watched, updatedAt: now })))
       await db.entries.update(mediaId, { updatedAt: now, status: updated.status })
     })
   }
@@ -302,7 +314,7 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
   }
 
   return {
-    read, watch, save, savePreference, setEpisode, remove, exportBackup, previewRestore, applyRestore,
+    read, watch, save, completeToday, savePreference, setEpisode, remove, exportBackup, previewRestore, applyRestore,
     purgeExpired, refreshSnapshot, readResponse, cacheResponse,
     close: () => db.close(),
     deleteDatabase: () => db.delete(),
