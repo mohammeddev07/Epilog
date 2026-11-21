@@ -104,6 +104,18 @@ describe('catalog Worker', () => {
     expect(await season.json()).toEqual({ episodes: [{ season: 0, number: 1, title: 'Mini episode', externalId: '99', airDate: '2026-10-05' }] })
   })
 
+  it('maps runtime, countries and original language from details and rejects malformed values', async () => {
+    const upstream = vi.fn<typeof fetch>(async (input) => String(input).includes('/movie/')
+      ? Response.json({ id: 7, title: 'A film', runtime: 128, original_language: 'fr', production_countries: [{ iso_3166_1: 'FR' }, { iso_3166_1: 'bad' }] })
+      : Response.json({ id: 8, name: 'A show', episode_run_time: [], last_episode_to_air: { runtime: 44 }, origin_country: ['KR'], original_language: 'Korean!' }))
+    const worker = createCatalogWorker(upstream)
+    const film = await (await worker.fetch(new Request(`${origin}/api/catalog/detail/tmdb%3Amovie%3A7`), env)).json()
+    expect(film.items[0]).toMatchObject({ runtime: 128, countries: ['FR'], language: 'fr' })
+    const show = await (await worker.fetch(new Request(`${origin}/api/catalog/detail/tmdb%3Atv%3A8`), env)).json()
+    expect(show.items[0]).toMatchObject({ runtime: 44, countries: ['KR'] })
+    expect(show.items[0]).not.toHaveProperty('language')
+  })
+
   it('keeps the provider’s game popularity ordering and caches the public shelf', async () => {
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input)
@@ -146,5 +158,79 @@ describe('catalog Worker', () => {
       expect((await worker.fetch(new Request(url + '?' + query), env)).status).toBe(400)
     }
     expect(upstream).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('catalog browsing', () => {
+  it('uses whole decades and single years for movies and TV and rejects mismatched periods', async () => {
+    const upstream = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input))
+      if (url.pathname.endsWith('/movie')) {
+        expect(url.searchParams.get('primary_release_date.gte')).toBe('2010-01-01')
+        expect(url.searchParams.get('primary_release_date.lte')).toBe('2019-12-31')
+        expect(url.searchParams.get('sort_by')).toBe('primary_release_date.desc')
+        return Response.json({ total_pages: 1, results: [{ id: 42, title: '2012 film', release_date: '2012-07-01' }] })
+      }
+      expect(url.searchParams.get('first_air_date.gte')).toBe('1984-01-01')
+      expect(url.searchParams.get('first_air_date.lte')).toBe('1984-12-31')
+      expect(url.searchParams.get('sort_by')).toBe('first_air_date.desc')
+      return Response.json({ total_pages: 3, results: [{ id: 43, name: '1984 show', first_air_date: '1984-05-10' }] })
+    })
+    const worker = createCatalogWorker(upstream)
+    const browse = (suffix: string) => worker.fetch(new Request(origin + '/api/catalog/discover/' + suffix), env)
+    const movies = await browse('release/movies?decade=2010')
+    expect(await movies.json()).toMatchObject({ items: [{ title: '2012 film', year: 2012 }], hasMore: false })
+    const tv = await browse('release/tv?decade=1980&year=1984&page=2')
+    expect(await tv.json()).toMatchObject({ items: [{ title: '1984 show', year: 1984 }], hasMore: true })
+    for (const path of ['release/movies?decade=1980&year=1990', 'release/movies?decade=2010&year=2012&year=2011', 'rated/movies?year=2012']) {
+      expect((await browse(path)).status).toBe(400)
+    }
+    expect(upstream).toHaveBeenCalledTimes(2)
+  })
+
+  it('ranks both anime formats and uses popularity for upcoming TMDB titles', async () => {
+    const upstream = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input))
+      const movie = url.pathname.endsWith('/movie')
+      const sort = url.searchParams.get('sort_by')
+      if (sort === 'popularity.desc') {
+        expect(url.searchParams.get('primary_release_date.gte')).toBe(new Date().toISOString().slice(0, 10))
+        return Response.json({ total_pages: 1, results: [{ id: 10, title: 'Upcoming film' }] })
+      }
+      expect(sort).toBe('vote_average.desc')
+      expect(Number(url.searchParams.get('vote_count.gte'))).toBeGreaterThan(0)
+      expect(url.searchParams.get('with_original_language')).toBe('ja')
+      expect(url.searchParams.get('with_genres')).toBe('16')
+      const japanese = { original_language: 'ja', genre_ids: [16] }
+      return Response.json({ total_pages: 1, results: movie
+        ? [{ ...japanese, id: 1, title: 'Anime film', vote_average: 8.2 }]
+        : [{ ...japanese, id: 2, name: 'Anime series', vote_average: 9 }] })
+    })
+    const worker = createCatalogWorker(upstream)
+    const rated = await worker.fetch(new Request(origin + '/api/catalog/discover/rated/anime'), env)
+    expect(await rated.json()).toMatchObject({ items: [{ title: 'Anime series' }, { title: 'Anime film' }] })
+    const anticipated = await worker.fetch(new Request(origin + '/api/catalog/discover/anticipated/movies'), env)
+    expect(await anticipated.json()).toMatchObject({ items: [{ title: 'Upcoming film' }] })
+  })
+
+  it('uses IGDB scores, pre-release follows and UTC release boundaries', async () => {
+    const queries: string[] = []
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      if (String(input).includes('/oauth2/')) return Response.json({ access_token: 'fixture-app-token', expires_in: 600 })
+      expect(String(input)).toBe('https://api.igdb.com/v4/games')
+      queries.push(String(init?.body))
+      return Response.json([{ id: 1, name: 'A game' }])
+    })
+    const worker = createCatalogWorker(upstream)
+    for (const path of ['rated/games', 'anticipated/games', 'release/games?decade=2000&year=2000&page=2']) {
+      const response = await worker.fetch(new Request(origin + '/api/catalog/discover/' + path), env)
+      expect(await response.json()).toMatchObject({ items: [{ title: 'A game' }], hasMore: false })
+    }
+    expect(queries[0]).toContain('sort total_rating desc;')
+    expect(queries[0]).toContain('total_rating_count >=')
+    expect(queries[1]).toContain('hypes > 0; sort hypes desc;')
+    expect(queries[1]).toContain('first_release_date >=')
+    expect(queries[2]).toContain('first_release_date >= 946684800 & first_release_date < 978307200;')
+    expect(queries[2]).toContain('offset 32;')
   })
 })

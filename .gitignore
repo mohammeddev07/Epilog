@@ -12,3 +12,10 @@ test-results/
 !.dev.vars.example
 
 .wrangler/
+
+# Local tooling and scratch output
+look/
+.claude/
+coverage/
+*.log
+.DS_Store

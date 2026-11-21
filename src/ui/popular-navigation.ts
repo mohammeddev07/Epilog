@@ -1,17 +1,26 @@
-import { categories } from '../domain/media'
-import type { Category } from '../domain/media'
+import { defaultPopularCategory, defaultReleasePeriod, discoverSections, parseReleasePeriod } from '../domain/catalog'
+import type { BrowseQuery, DiscoverSection } from '../domain/catalog'
 
-export function popularPath(category: Category, title?: string) {
-  const params = new URLSearchParams()
-  if (category !== 'All') params.set('category', category)
+export function browsePath(category: DiscoverSection, query: BrowseQuery, title?: string) {
+  const params = new URLSearchParams({ category })
+  if (query.mode !== 'popular') params.set('view', query.mode)
+  if (query.mode === 'release') {
+    params.set('decade', String(query.period.decade))
+    if (query.period.year !== undefined) params.set('year', String(query.period.year))
+  }
   if (title) params.set('title', title)
-  return params.size ? '/popular?' + params.toString() : '/popular'
+  return '/popular?' + params.toString()
 }
 
 export function readPopularLocation(query: string) {
   const params = new URLSearchParams(query)
+  const mode = params.get('view')
+  const browse: BrowseQuery = mode === 'release'
+    ? { mode, period: parseReleasePeriod(params.get('decade'), params.get('year')) ?? defaultReleasePeriod }
+    : mode === 'rated' || mode === 'anticipated' ? { mode } : { mode: 'popular' }
   return {
-    category: categories.find((category) => category === params.get('category')) ?? 'All',
+    category: discoverSections.find((category) => category === params.get('category')) ?? defaultPopularCategory,
     title: params.get('title'),
+    browse,
   }
 }

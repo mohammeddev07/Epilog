@@ -1,13 +1,15 @@
+import { CheckCircleIcon, ChecksIcon } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
 import { useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useCatalogSeason } from '../data/useCatalog'
 import { CatalogFeedback, catalogMessage, CatalogSkeleton, offlineCacheError } from './CatalogFeedback'
-import { episodeKey, episodeWatchState, isEpisodePosition, manualEpisode, nextEpisode } from '../domain/media'
+import { episodeKey, episodeWatchState, isEpisodePosition, localDate, manualEpisode, nextEpisode } from '../domain/media'
 import type { Episode, LibraryEntry } from '../domain/media'
 import { rise, useMotionEnabled } from './motion'
+import { iconSize } from './tokens'
 
-export type SetEpisode = (entry: LibraryEntry, episode: Episode, watched: boolean) => Promise<void>
+export type SetEpisode = (entry: LibraryEntry, episodes: readonly Episode[], watched: boolean) => Promise<void>
 
 export function EpisodeTracker({ entry, episodes = [], onEpisode }: {
   entry: LibraryEntry
@@ -39,16 +41,24 @@ export function EpisodeTracker({ entry, episodes = [], onEpisode }: {
   const next = nextEpisode(entry) ?? (!completed && currentSeason === defaultSeason
     ? catalog.episodes?.find((episode) => episode.season > 0 && !isWatched(episode))
     : undefined)
+  const seasonEpisodes = [...available.values()].filter((episode) => episode.season === currentSeason)
+    .sort((first, second) => first.number - second.number)
+  // Only aired episodes: marking a season never ticks ones that haven't been released yet.
+  const today = localDate()
+  const aired = seasonEpisodes.filter((episode) => !episode.airDate || episode.airDate <= today)
+  const seasonDone = aired.length > 0 && aired.every(isWatched)
+  const seasonName = currentSeason === 0 ? 'specials' : `season ${currentSeason}`
   const feedback = [catalogMessage('episode catalog', catalog.status, catalog.retryAfter), catalog.cacheError ? offlineCacheError : ''].filter(Boolean)
 
-  async function save(episode: Episode, checked: boolean) {
-    if (pending.current) return
+  async function save(episode: Episode | readonly Episode[], checked: boolean) {
+    const episodes = [episode].flat()
+    if (pending.current || !episodes.length) return
     pending.current = true
     setBusy(true)
-    setSelection(episode.season)
+    setSelection(episodes[0].season)
     setError('')
     try {
-      await onEpisode(entry, episode, checked)
+      await onEpisode(entry, episodes, checked)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Episode progress could not be saved. Try again.')
     } finally {
@@ -83,9 +93,17 @@ export function EpisodeTracker({ entry, episodes = [], onEpisode }: {
               {seasons.map((season) => <option key={season} value={season}>{season === 0 ? 'Specials' : season}</option>)}
             </select>
           </label>
+          {aired.length ? (
+            <button
+              type="button" className="button button-secondary season-action" aria-disabled={busy || undefined}
+              onClick={() => void save(seasonDone ? aired : aired.filter((episode) => !isWatched(episode)), !seasonDone)}
+            >
+              {seasonDone ? <CheckCircleIcon size={iconSize.md} weight="fill" aria-hidden="true" /> : <ChecksIcon size={iconSize.md} aria-hidden="true" />}
+              Mark {seasonName} {seasonDone ? 'unwatched' : 'watched'}
+            </button>
+          ) : null}
           <motion.ul className="episode-list" key={currentSeason} initial={animate ? 'hidden' : false} animate="visible" variants={rise}>
-            {[...available.values()].filter((episode) => episode.season === currentSeason)
-              .sort((first, second) => first.number - second.number).map((episode) => (
+            {seasonEpisodes.map((episode) => (
                 <li key={episodeKey(episode)}>
                   <label className="episode-row">
                     <span><span className="muted">{episode.number}.</span> {episode.title}</span>
