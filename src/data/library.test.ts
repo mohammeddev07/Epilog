@@ -36,15 +36,13 @@ describe('IndexedDB library', () => {
     })
     await original.table('media').put({ id: game.id, format: 'GAME', anime: false })
     await original.table('entries').put({ mediaId: game.id, status: 'In progress', createdAt: 1, updatedAt: 2, playtimeMinutes: 150 })
-    await original.table('catalog').put({ key: 'igdb:game:7', mediaId: game.id, media: game, expiresAt: Date.now() + 60_000 })
+    await original.table('catalog').put({ key: 'igdb:game:7', mediaId: game.id, media: game, expiresAt: 1 })
     original.close()
 
-    let now = Date.now()
-    const upgraded = open(name, () => now)
+    const upgraded = open(name)
     expect((await upgraded.read()).get(game.id)).toMatchObject({ status: 'In progress', playtimeMinutes: 150 })
     await upgraded.cacheResponse('search/igdb:game', 'igdb', { items: [] })
     expect((await upgraded.readResponse('search/igdb:game'))?.payload).toEqual({ items: [] })
-    now += 2 * 60_000
     expect(await upgraded.missingSnapshots()).toEqual([{ mediaId: game.id, catalogRef: 'igdb:game:7' }])
   })
 
@@ -330,6 +328,54 @@ describe('IndexedDB library', () => {
     expect(await store.pendingChanges(500)).toEqual([])
     await store.applyRemote([{ kind: 'entry', id: film.id, data: null, at: 3000 }], {})
     expect((await store.read()).size).toBe(0)
+  })
+
+  it('a later local entry keeps remote values it never set', async () => {
+    const store = open(undefined, () => 2000)
+    await store.setAccount(account)
+    const { id } = await store.savePreference(catalogFilm, { kind: 'like', value: true })
+    const groups = { progress: { status: 'Completed' as const, at: 1000 }, liked: { at: 0 }, rating: { value: 4, at: 1000 }, watchlisted: { at: 0 }, label: { at: 0 } }
+    await store.applyRemote([
+      { kind: 'entry', id: 'm-remote', data: { format: 'MOVIE', anime: false, catalogRef: 'tmdb:movie:1', createdAt: 900, groups }, at: 1000 },
+    ], {})
+    const entries = await store.read()
+    expect(entries.has(id)).toBe(false)
+    expect(entries.get('m-remote')).toMatchObject({ status: 'Completed', liked: true, rating: 4 })
+  })
+
+  it('an entry saved before v3 does not erase a remote rating', async () => {
+    const name = crypto.randomUUID()
+    const original = new Dexie(name)
+    original.version(2).stores({
+      media: 'id', entries: 'mediaId,status,updatedAt', completions: 'id,mediaId',
+      episodes: '[mediaId+season+number],mediaId', catalog: 'key,&mediaId,expiresAt', responses: 'key,writtenAt,expiresAt',
+    })
+    await original.table('media').put({ id: film.id, format: 'MOVIE', anime: false })
+    await original.table('entries').put({ mediaId: film.id, createdAt: 1, updatedAt: 5000, liked: true })
+    original.close()
+
+    const store = open(name)
+    await store.setAccount(account)
+    const groups = { progress: { at: 0 }, liked: { at: 0 }, rating: { value: 4, at: 1000 }, watchlisted: { at: 0 }, label: { at: 0 } }
+    await store.applyRemote([{ kind: 'entry', id: film.id, data: { format: 'MOVIE', anime: false, createdAt: 1, groups }, at: 1000 }], {})
+    expect((await store.read()).get(film.id)).toMatchObject({ liked: true, rating: 4 })
+  })
+
+  it('a remap queues moved children under the canonical id', async () => {
+    const store = open()
+    await store.setAccount(account)
+    await store.save(anime, { status: 'Completed', completion: { id: 'c1', date: '2026-11-18' } })
+    await store.setEpisode(anime.id, manualEpisode({ season: 1, number: 2 }), true)
+    await store.acknowledge(await store.pendingChanges(500))
+    expect(await store.pendingChanges(500)).toEqual([])
+    await store.applyRemote([], { [anime.id]: 'm-canon' })
+    const changes = await store.pendingChanges(500)
+    expect(changes).toHaveLength(3)
+    expect(changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'completion', id: 'c1', data: { mediaId: 'm-canon', date: '2026-11-18' } }),
+      expect.objectContaining({ kind: 'episode', id: 'm-canon:1:2', data: { mediaId: 'm-canon', season: 1, number: 2, watched: true } }),
+      expect.objectContaining({ kind: 'episode', id: `${anime.id}:1:2`, data: null }),
+    ]))
   })
 
   it('acknowledge keeps a change edited after it was read', async () => {

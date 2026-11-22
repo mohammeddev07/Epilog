@@ -39,16 +39,23 @@ function groupValues(row: Omit<EntryRow, 'groupsAt'> | undefined, label: string 
   return { progress: [row?.status, row?.reading, row?.playtimeMinutes], liked: row?.liked, rating: row?.rating, watchlisted: row?.watchlisted, label }
 }
 
-/** Stamps `at` on the groups whose values changed; rows saved before v3 fall back to their `updatedAt`. */
+const filled = (value: unknown) => Array.isArray(value) ? value.some((item) => item !== undefined) : value !== undefined
+
+/** A group's stamp. Rows saved before v3 use `updatedAt` for groups holding a value, and 0 for empty ones, so they never erase remote values. */
+function groupAt(row: EntryRow, label: string | undefined, name: GroupName) {
+  return row.groupsAt?.[name] ?? (filled(groupValues(row, label)[name]) ? row.updatedAt : 0)
+}
+
+/** Stamps `at` on the groups whose values changed; a new row's empty groups get 0. */
 function stampGroups(before: EntryRow | undefined, beforeLabel: string | undefined, after: Omit<EntryRow, 'groupsAt'>, afterLabel: string | undefined, at: number) {
   const old = groupValues(before, beforeLabel)
   const next = groupValues(after, afterLabel)
   return Object.fromEntries(groupNames.map((name) => [name, before && JSON.stringify(old[name]) === JSON.stringify(next[name])
-    ? before.groupsAt?.[name] ?? before.updatedAt : at])) as Record<GroupName, number>
+    ? groupAt(before, beforeLabel, name) : before || filled(next[name]) ? at : 0])) as Record<GroupName, number>
 }
 
 function entryData(row: EntryRow, media: OwnedMedia): EntryData {
-  const at = (name: GroupName) => row.groupsAt?.[name] ?? row.updatedAt
+  const at = (name: GroupName) => groupAt(row, media.label, name)
   return {
     format: media.format, anime: media.anime, bookType: media.bookType, catalogRef: media.catalogRef, createdAt: row.createdAt,
     groups: {
@@ -81,7 +88,7 @@ class LibraryDatabase extends Dexie {
   declare outbox: Table<OutboxRow, [string, string]>
   declare meta: Table<MetaRow, string>
 
-  constructor(name: string, clock: () => number) {
+  constructor(name: string) {
     super(name)
     this.version(1).stores({
       media: 'id',
@@ -92,7 +99,8 @@ class LibraryDatabase extends Dexie {
     })
     this.version(2).stores({ responses: 'key,writtenAt,expiresAt' })
     this.version(3).stores({ media: 'id,catalogRef', outbox: '[kind+id],at', meta: 'key' }).upgrade(async (tx) => {
-      const links: CatalogRow[] = await tx.table('catalog').where('expiresAt').above(clock()).toArray()
+      // Catalog keys never expire, only their snapshots do.
+      const links: CatalogRow[] = await tx.table('catalog').toArray()
       for (const { key, mediaId } of links) await tx.table('media').update(mediaId, { catalogRef: key })
     })
   }
@@ -159,7 +167,7 @@ function libraryEntry(entry: BackupEntry, snapshot?: Media): LibraryEntry {
 }
 
 export function createLibrary(name = 'epilog', clock = Date.now) {
-  const db = new LibraryDatabase(name, clock)
+  const db = new LibraryDatabase(name)
   const records = [db.media, db.entries, db.completions, db.episodes]
   const tables = [...records, db.catalog, db.outbox, db.meta]
 
@@ -535,6 +543,7 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
     if (from === to) return
     const local = await currentChange({ kind: 'entry', id: from })
     const target = await currentChange({ kind: 'entry', id: to })
+    const completionIds = await db.completions.where({ mediaId: from }).primaryKeys()
     await db.completions.where({ mediaId: from }).modify({ mediaId: to })
     const episodes = await db.episodes.where({ mediaId: from }).toArray()
     await db.episodes.where({ mediaId: from }).delete()
@@ -547,16 +556,17 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
       await db.catalog.delete(link.key)
       if (!await db.catalog.where({ mediaId: to }).count()) await db.catalog.put({ ...link, mediaId: to })
     }
-    const queued = [
-      ...await db.outbox.where({ kind: 'entry', id: from }).toArray(),
-      ...await db.outbox.where('[kind+id]').between(['episode', `${from}:`], ['episode', `${from}:\uffff`]).toArray(),
-    ]
-    await db.outbox.bulkDelete(queued.map(({ kind, id }): [string, string] => [kind, id]))
-    for (const row of queued) {
-      const id = row.kind === 'entry' ? to : `${to}${row.id.slice(from.length)}`
-      const kept = await db.outbox.get([row.kind, id])
-      await db.outbox.put({ ...row, id, at: Math.max(row.at, kept?.at ?? 0) })
+    const queued = await db.outbox.get(['entry', from])
+    if (queued) {
+      await db.outbox.delete(['entry', from])
+      const kept = await db.outbox.get(['entry', to])
+      await db.outbox.put({ ...queued, id: to, at: Math.max(queued.at, kept?.at ?? 0) })
     }
+    // Moved children may already be acknowledged under the old id: queue them again, with tombstones for the old episode ids.
+    await enqueue([
+      ...completionIds.map((id) => ({ kind: 'completion' as const, id })),
+      ...episodes.flatMap((episode) => [to, from].map((mediaId) => ({ kind: 'episode' as const, id: episodeId(mediaId, episode) }))),
+    ], clock())
     await db.entries.delete(from)
     await db.media.delete(from)
     if (local) await writeChange(mergeChange(target, { ...local, id: to }))
