@@ -1,5 +1,5 @@
 // Tests only: a node:sqlite D1 stand-in. Never import this from Worker code.
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import type { SQLInputValue } from 'node:sqlite'
 import type { D1Database, D1PreparedStatement, D1Value } from './d1'
 
@@ -12,7 +12,9 @@ process.emitWarning = ((warning: string | Error, ...rest: never[]) => {
 const { DatabaseSync } = await import('node:sqlite')
 process.emitWarning = emitWarning
 
-const migration = readFileSync(new URL('./migrations/0001_accounts.sql', import.meta.url), 'utf8')
+const migrations = new URL('./migrations/', import.meta.url)
+const migration = readdirSync(migrations).filter((name) => name.endsWith('.sql')).sort()
+  .map((name) => readFileSync(new URL(name, migrations), 'utf8')).join('\n')
 
 export function createTestD1() {
   const sqlite = new DatabaseSync(':memory:')

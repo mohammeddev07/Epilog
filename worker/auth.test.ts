@@ -151,12 +151,13 @@ describe('account Worker', () => {
 
   it('serves the client ID, and hides account routes until D1 and the client ID are configured', async () => {
     expect(await (await call('/api/config')).json()).toEqual({ googleClientId: clientId })
-    expect((await call('/api/sync', mutate('POST', undefined, {}))).status).toBe(404)
+    expect((await call('/api/sync', mutate('POST', undefined, {}))).status).toBe(401)
     for (const missing of [{ DB: undefined }, { GOOGLE_CLIENT_ID: undefined }]) {
       env = { ...env, ...missing }
       expect(await (await call('/api/config')).json()).toEqual({ googleClientId: '' })
       expect((await signIn(token())).status).toBe(404)
       expect((await call('/api/account')).status).toBe(404)
+      expect((await call('/api/sync', mutate('POST', undefined, {}))).status).toBe(404)
     }
     expect(upstream).not.toHaveBeenCalled()
   })

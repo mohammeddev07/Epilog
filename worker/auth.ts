@@ -1,6 +1,8 @@
+import { maxSyncBytes } from '../src/domain/sync'
 import type { D1Database } from './d1'
 import { CatalogFailure, errorResponse, isJson, readJson, record, rejectCrossSite, responseHeaders } from './http'
 import type { Env } from './index'
+import { handleSync } from './sync'
 
 const cookieName = '__Host-epilog_session'
 const day = 86_400_000
@@ -9,7 +11,7 @@ const slideBelow = 60 * day
 const issuers = ['accounts.google.com', 'https://accounts.google.com']
 const certsUrl = 'https://www.googleapis.com/oauth2/v3/certs'
 const encoder = new TextEncoder()
-const routes = ['POST /api/auth/google', 'POST /api/auth/logout', 'GET /api/account', 'DELETE /api/account']
+const routes = ['POST /api/auth/google', 'POST /api/auth/logout', 'GET /api/account', 'DELETE /api/account', 'POST /api/sync']
 
 const sessionCookie = (token: string, maxAge: number) =>
   `${cookieName}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${maxAge / 1000}`
@@ -95,6 +97,7 @@ export function createAccountRoutes(options: { keys?: () => Promise<JsonWebKey[]
       const url = new URL(request.url)
       const path = url.pathname
       if (!['/api/config', '/api/account', '/api/sync'].includes(path) && !path.startsWith('/api/auth/')) return undefined
+      let renewed: string | undefined
       try {
         rejectCrossSite(request, url)
         const { DB: db, GOOGLE_CLIENT_ID: clientId } = env
@@ -140,6 +143,12 @@ export function createAccountRoutes(options: { keys?: () => Promise<JsonWebKey[]
 
         const user = await sessionUser(request, db, now())
         if (!user) throw new CatalogFailure(401)
+        renewed = user.cookie
+        if (route === 'POST /api/sync') {
+          const rate = await env.SYNC_RATE_LIMITER?.limit({ key: user.id })
+          if (rate && !rate.success) throw new CatalogFailure(429, 60)
+          return reply(await handleSync(db, user.id, await readJson(request, maxSyncBytes, 400, 413), now()), user.cookie)
+        }
         if (route === 'GET /api/account') {
           const account = await db.prepare('SELECT email, name FROM users WHERE id = ?').bind(user.id).first<{ email: string; name: string }>()
           if (!account) throw new CatalogFailure(401)
@@ -152,7 +161,8 @@ export function createAccountRoutes(options: { keys?: () => Promise<JsonWebKey[]
         ])
         return reply(null, clearCookie)
       } catch (error) {
-        return errorResponse(error)
+        // A renewed session still reaches the browser when the request itself fails.
+        return errorResponse(error, renewed)
       }
     },
   }
