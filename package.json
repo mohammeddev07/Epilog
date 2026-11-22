@@ -13,7 +13,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run && playwright test",
-    "test:catalog": "node --env-file-if-exists=.env.catalog.local --experimental-strip-types --test scripts/catalog-coverage.ts",
+    "test:catalog": "node --env-file-if-exists=.env.catalog.local --experimental-strip-types --test test/catalog-coverage.ts",
     "dev:ui": "vite --mode demo",
     "deploy:check": "npm run build && wrangler deploy --dry-run --outdir .wrangler/dry-run"
   },

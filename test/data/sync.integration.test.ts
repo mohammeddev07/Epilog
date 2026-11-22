@@ -2,13 +2,13 @@
 import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleSync } from '../../worker/sync'
-import { createTestD1 } from '../../worker/test-d1'
-import { parseBackup } from '../domain/backup-file'
-import { manualEpisode } from '../domain/media'
-import type { Media } from '../domain/media'
-import { createLibrary } from './library'
-import type { LibraryStore } from './library'
-import { createSync } from './sync'
+import { createTestD1 } from '../support/test-d1'
+import { parseBackup } from '../../src/domain/backup-file'
+import { manualEpisode } from '../../src/domain/media'
+import type { Media } from '../../src/domain/media'
+import { createLibrary } from '../../src/data/library'
+import type { LibraryStore } from '../../src/data/library'
+import { createSync } from '../../src/data/sync'
 
 const account = { sub: 'sub-ada', email: 'ada@example.test', name: 'Ada' }
 const movie = (id: string, title: string): Media => ({

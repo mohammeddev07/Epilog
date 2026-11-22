@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { tombstoneAge } from '../src/domain/sync'
-import type { EntryData, SyncChange } from '../src/domain/sync'
-import { createAccountRoutes } from './auth'
-import { createCatalogWorker } from './index'
-import type { Env } from './index'
-import { handleSync } from './sync'
-import { createTestD1 } from './test-d1'
+import { tombstoneAge } from '../../src/domain/sync'
+import type { EntryData, SyncChange } from '../../src/domain/sync'
+import { createAccountRoutes } from '../../worker/auth'
+import { createCatalogWorker } from '../../worker/index'
+import type { Env } from '../../worker/index'
+import { handleSync } from '../../worker/sync'
+import { createTestD1 } from '../support/test-d1'
 
 const start = 1_800_000_000_000
 const origin = 'https://epilog.test'

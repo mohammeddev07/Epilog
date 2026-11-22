@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { Episode, LibraryEntry, Media } from './media'
-import { libraryStats } from './stats'
+import type { Episode, LibraryEntry, Media } from '../../src/domain/media'
+import { libraryStats } from '../../src/domain/stats'
 
 const media = (fields: Partial<Media> & Pick<Media, 'format'>) => ({ id: fields.title ?? 'x', title: 'x', genres: [], description: '', anime: false, ...fields }) as Media
 const entry = (m: Media, extra: Partial<LibraryEntry> = {}): LibraryEntry => ({ media: m, status: 'Completed', completions: [], watched: [], unwatched: [], updatedAt: 1, ...extra })

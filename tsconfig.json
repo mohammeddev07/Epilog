@@ -14,5 +14,5 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["src", "tests", "scripts", "worker", "pages/functions", "*.config.ts"]
+  "include": ["src", "test", "scripts", "worker", "pages/functions", "*.config.ts"]
 }

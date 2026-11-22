@@ -1,16 +1,16 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { deleteAccount, googleClientId, signIn, signOut, UnsyncedChangesError } from './account'
-import { demoCatalog } from './demo'
-import { library } from './library'
-import { sync } from './sync'
+import { deleteAccount, googleClientId, signIn, signOut, UnsyncedChangesError } from '../../src/data/account'
+import { demoCatalog } from '../../src/data/demo'
+import { library } from '../../src/data/library'
+import { sync } from '../../src/data/sync'
 
-vi.mock('./library', () => ({
+vi.mock('../../src/data/library', () => ({
   library: {
     hasUnsyncedChanges: vi.fn(), setAccount: vi.fn(), clearAll: vi.fn(),
     account: vi.fn(), read: vi.fn(), saveMergeSnapshot: vi.fn(), enqueueAll: vi.fn(),
   },
 }))
-vi.mock('./sync', () => ({ sync: { syncNow: vi.fn(), state: vi.fn() } }))
+vi.mock('../../src/data/sync', () => ({ sync: { syncNow: vi.fn(), state: vi.fn() } }))
 
 afterEach(() => {
   vi.resetAllMocks()

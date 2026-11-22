@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test'
 const url = 'http://127.0.0.1:4176'
 
 export default defineConfig({
-  testDir: './tests',
+  testDir: './test/e2e',
   fullyParallel: true,
   use: { baseURL: url, trace: 'retain-on-failure' },
   webServer: [{

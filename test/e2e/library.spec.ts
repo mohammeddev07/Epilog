@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
-import { parseBackup } from '../src/domain/backup-file'
+import { parseBackup } from '../../src/domain/backup-file'
 
 test('persists repeat film completions and supports confirmed removal', async ({ page }) => {
   await page.goto('/title/the-last-signal')

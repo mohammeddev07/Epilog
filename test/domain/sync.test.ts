@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { clampTime, mergeChange, syncChangeSchema } from './sync'
-import type { EntryData, SyncChange } from './sync'
+import { clampTime, mergeChange, syncChangeSchema } from '../../src/domain/sync'
+import type { EntryData, SyncChange } from '../../src/domain/sync'
 
 const empty = { at: 0 }
 function entryData(groups: Partial<EntryData['groups']> = {}, extra: Partial<EntryData> = {}): EntryData {

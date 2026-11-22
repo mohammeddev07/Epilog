@@ -1,11 +1,11 @@
 import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { manualEpisode } from '../domain/media'
-import type { SyncChange } from '../domain/sync'
-import { demoCatalog } from './demo'
-import { createLibrary, libraryChanged } from './library'
-import type { LibraryStore } from './library'
-import { createSync } from './sync'
+import { manualEpisode } from '../../src/domain/media'
+import type { SyncChange } from '../../src/domain/sync'
+import { demoCatalog } from '../../src/data/demo'
+import { createLibrary, libraryChanged } from '../../src/data/library'
+import type { LibraryStore } from '../../src/data/library'
+import { createSync } from '../../src/data/sync'
 
 const film = demoCatalog.find(({ id }) => id === 'the-last-signal')!
 const anime = demoCatalog.find(({ format, anime }) => format === 'SERIES' && anime)!

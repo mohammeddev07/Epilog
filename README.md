@@ -76,7 +76,13 @@ npm run test:catalog
 npm run deploy:check
 ```
 
-`npm test` runs the unit, IndexedDB, Worker, and Chromium suites. Browser tests use synthetic provider responses. `npm run test:catalog` makes authenticated TMDB and IGDB calls using local credentials and reports coverage without writing provider responses.
+`npm test` runs the Vitest and Chromium suites under `test/`. Playwright specs live in `test/e2e/` and use synthetic provider responses. `npm run test:catalog` makes authenticated TMDB and IGDB calls using local credentials and reports coverage without writing provider responses.
+
+### Required check for develop
+
+The [Develop validation workflow](.github/workflows/develop-validation.yml) runs lint, type checking, Vitest, and Chromium for pull requests and merge queue entries targeting `develop`.
+
+To enforce it, let the workflow run on a pull request targeting `develop`. In the repository’s **Settings → Rules → Rulesets**, create an active branch ruleset targeting `develop`. Require a pull request before merging and require the **Develop tests** status check from GitHub Actions. Enable the up-to-date requirement if the branch uses regular pull request merges. Keep the bypass list empty if everyone must pass the check. [GitHub ruleset setup](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository).
 
 ## Personal deployment on Cloudflare
 

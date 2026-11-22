@@ -2,9 +2,9 @@ import AxeBuilder from '@axe-core/playwright'
 import { readFile } from 'node:fs/promises'
 import { expect, test } from '@playwright/test'
 import type { BrowserContext, Page } from '@playwright/test'
-import { parseBackup } from '../src/domain/backup-file'
-import { mergeChange } from '../src/domain/sync'
-import type { EntryData, SyncChange } from '../src/domain/sync'
+import { parseBackup } from '../../src/domain/backup-file'
+import { mergeChange } from '../../src/domain/sync'
+import type { EntryData, SyncChange } from '../../src/domain/sync'
 
 test.use({ baseURL: 'http://127.0.0.1:4178' })
 

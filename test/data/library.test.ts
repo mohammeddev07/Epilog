@@ -1,12 +1,12 @@
 import 'fake-indexeddb/auto'
 import { Dexie } from 'dexie'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { parseBackup } from '../domain/backup-file'
-import { episodeWatchState, isWatchlisted, manualEpisode } from '../domain/media'
-import type { Media } from '../domain/media'
-import { demoCatalog } from './demo'
-import { createLibrary } from './library'
-import type { LibraryStore } from './library'
+import { parseBackup } from '../../src/domain/backup-file'
+import { episodeWatchState, isWatchlisted, manualEpisode } from '../../src/domain/media'
+import type { Media } from '../../src/domain/media'
+import { demoCatalog } from '../../src/data/demo'
+import { createLibrary } from '../../src/data/library'
+import type { LibraryStore } from '../../src/data/library'
 
 const film = demoCatalog.find(({ id }) => id === 'the-last-signal')!
 const game = demoCatalog.find(({ format }) => format === 'GAME')!

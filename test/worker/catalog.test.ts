@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createCatalogWorker } from './index'
-import type { Env } from './index'
+import { createCatalogWorker } from '../../worker/index'
+import type { Env } from '../../worker/index'
 
 const env: Env = {
   TMDB_READ_ACCESS_TOKEN: 'fixture-tmdb-token',
