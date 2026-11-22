@@ -1,6 +1,8 @@
+import { readingText, validateReading } from './books'
+import type { BookType, ReadingProgress } from './books'
 import type { CatalogIdentity } from './identity'
 
-export const categories = ['All', 'Movies', 'TV Shows', 'Anime', 'Games'] as const
+export const categories = ['All', 'Movies', 'TV Shows', 'Books', 'Anime', 'Games'] as const
 export type Category = (typeof categories)[number]
 
 export const statuses = ['Planned', 'In progress', 'Completed', 'Dropped'] as const
@@ -55,6 +57,7 @@ export type Media = MediaFields & (
   | { format: 'MOVIE'; anime: boolean }
   | { format: 'SERIES'; anime: boolean; episodes?: readonly Episode[]; seasons?: readonly Season[]; episodeTotal?: number }
   | { format: 'GAME'; anime?: never }
+  | { format: 'BOOK'; bookType: BookType; anime?: never }
 )
 
 export interface Completion {
@@ -67,6 +70,7 @@ export interface LibraryEntry extends TitlePreferences {
   status?: Status
   completions: readonly Completion[]
   playtimeMinutes?: number
+  reading?: ReadingProgress
   watched: readonly Episode[]
   unwatched: readonly EpisodePosition[]
   createdAt?: number // date added; optional for entries built before it was exposed
@@ -78,6 +82,7 @@ export interface LogDraft {
   status: Status
   completion?: Completion
   playtimeMinutes?: number
+  reading?: ReadingProgress
   label?: string
 }
 
@@ -88,6 +93,7 @@ export function isWatchlisted(entry?: LibraryEntry) {
 }
 
 export function primaryCategory(media: Media): Exclude<Category, 'All'> {
+  if (media.format === 'BOOK') return 'Books'
   if (media.anime) return 'Anime'
   if (media.format === 'MOVIE') return 'Movies'
   if (media.format === 'SERIES') return 'TV Shows'
@@ -99,15 +105,18 @@ export function inCategory(media: Media, category: Category) {
     (category === 'Anime' && media.anime === true) ||
     (category === 'Movies' && media.format === 'MOVIE') ||
     (category === 'TV Shows' && media.format === 'SERIES' && !media.anime) ||
-    (category === 'Games' && media.format === 'GAME')
+    (category === 'Games' && media.format === 'GAME') ||
+    (category === 'Books' && media.format === 'BOOK')
 }
 
 export function trackingAction(media: Media, entry?: LibraryEntry) {
   const completed = entry?.status === 'Completed'
+  if (media.format === 'BOOK') return completed ? 'Finished' : 'Finish book'
   return media.format === 'GAME' ? (completed ? 'Played' : 'Play') : (completed ? 'Watched' : 'Watch')
 }
 
 export function formatLabel(media: Media) {
+  if (media.format === 'BOOK') return media.bookType
   if (media.anime) return media.format === 'MOVIE' ? 'Anime film' : 'Anime series'
   if (media.format === 'MOVIE') return 'Movie'
   if (media.format === 'SERIES') return 'TV show'
@@ -161,6 +170,7 @@ export function nextEpisode(entry: LibraryEntry) {
 const hoursFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
 
 export function progressText(entry: LibraryEntry) {
+  if (entry.media.format === 'BOOK' && entry.reading) return readingText(entry.reading)
   if (entry.media.format === 'GAME' && entry.playtimeMinutes !== undefined) {
     return `${hoursFormatter.format(entry.playtimeMinutes / 60)} hr played`
   }
@@ -219,6 +229,12 @@ export function updateEntry(media: Media, current: LibraryEntry | undefined, dra
     (!Number.isSafeInteger(draft.playtimeMinutes) || draft.playtimeMinutes < 0)) {
     throw new Error('Enter a valid total number of hours.')
   }
+  let reading = draft.reading ?? current?.reading
+  if (reading) {
+    if (media.format !== 'BOOK') throw new Error('Reading progress applies only to books.')
+    validateReading(reading)
+    if (draft.status === 'Completed' && reading.total !== undefined) reading = { ...reading, count: reading.total }
+  }
   const label = draft.label === undefined ? current?.label : draft.label.trim() || undefined
   if (label && label.length > titleLengthLimit) throw new Error('Choose a shorter backup label.')
   const addsCompletion = draft.status === 'Completed' && completion && !completions.some(({ id }) => id === completion.id)
@@ -230,6 +246,7 @@ export function updateEntry(media: Media, current: LibraryEntry | undefined, dra
     media,
     status: draft.status,
     completions: addsCompletion ? [...completions, completion] : completions,
+    reading,
     playtimeMinutes: media.format === 'GAME' ? draft.playtimeMinutes : undefined,
     watched: current?.watched ?? [],
     unwatched: completesSeries ? [] : current?.unwatched ?? [],

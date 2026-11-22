@@ -17,7 +17,7 @@ export function useOpenDetail() {
 
   return (id: string, triggerId: string, posterId = triggerId) => {
     const state: DetailOrigin = {
-      url: location.pathname + location.search,
+      url: location.pathname + location.search + location.hash,
       triggerId,
       posterId,
       scrollY: window.scrollY,

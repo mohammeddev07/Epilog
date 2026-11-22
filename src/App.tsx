@@ -3,10 +3,10 @@ import { AnimatePresence, LayoutGroup, motion, MotionConfig } from 'motion/react
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, matchPath, NavLink, useLocation, useNavigate } from 'react-router'
 import { demoById } from './data/demo'
-import { discoverSections, mediaKey } from './domain/catalog'
+import { discoverSections, mediaKey, providerDisplayName } from './domain/catalog'
 import { parseCatalogKey } from './domain/identity'
 import { peekPreview } from './data/catalog-client'
-import { useCatalogDetail, useConnection, demoMode } from './data/useCatalog'
+import { useCatalogDetail, useConnection, demoMode, warmCatalog } from './data/useCatalog'
 import { statuses } from './domain/media'
 import { library } from './data/library'
 import { useLibrary } from './data/useLibrary'
@@ -24,7 +24,9 @@ import type { DetailOrigin } from './ui/detail-navigation'
 import { CatalogFeedback, catalogMessage, CatalogSkeleton, offlineCacheError } from './ui/CatalogFeedback'
 import { LogDialog } from './ui/LogDialog'
 import type { LogSession } from './ui/LogDialog'
-import { crossfade, motionProperties, rise, useMotionEnabled } from './ui/motion'
+import { crossfade, duration, rise, useMotionEnabled } from './ui/motion'
+import { PosterTransition } from './ui/PosterTransition'
+import { SelectionIndicator } from './ui/SelectionIndicator'
 import { iconSize } from './ui/tokens'
 
 const InstallStatus = lazy(() => import('./ui/InstallStatus'))
@@ -37,13 +39,16 @@ const LogoMark = ({ size }: { size: number }) => (
   </svg>
 )
 
+// Once there's a library worth keeping, ask the browser not to clear it under storage pressure.
+let persistenceRequested = false
+function keepLibrary() {
+  if (persistenceRequested) return
+  persistenceRequested = true
+  void navigator.storage?.persist?.().catch(() => undefined)
+}
+
 function readTheme(): Theme {
-  try {
-    const saved = localStorage.getItem(appearanceKey)
-    return themes.find((theme) => theme === saved) ?? 'system'
-  } catch {
-    return 'system'
-  }
+  return themes.find((theme) => theme === document.documentElement.dataset.theme) ?? 'system'
 }
 
 const navigation = [
@@ -56,6 +61,14 @@ const navigation = [
 const noEntries = new Map<string, LibraryEntry>()
 
 export function App() {
+  const location = useLocation()
+  return <PosterTransition url={location.pathname + location.search + location.hash}
+    origin={matchPath('/title/:id', location.pathname) ? readDetailOrigin(location.state) : undefined} enabled={useMotionEnabled()}>
+    <Application />
+  </PosterTransition>
+}
+
+function Application() {
   const [refresh, setRefresh] = useState(0)
   const state = useLibrary(refresh)
   const entries = state.status === 'ready' ? state.entries : noEntries
@@ -79,16 +92,20 @@ export function App() {
   const identity = selectedEntry?.media.identity ?? (detailId ? parseCatalogKey(detailId) : undefined)
   const remote = useCatalogDetail(identity, retryDetail)
   const detail = selectedEntry
-    ? { ...(remote.item ?? selectedEntry.media), id: selectedEntry.media.id }
+    ? selectedEntry.media.format === 'BOOK' && remote.item?.format === 'BOOK'
+      ? { ...selectedEntry.media, description: remote.item.description || selectedEntry.media.description,
+        poster: remote.item.poster ?? selectedEntry.media.poster }
+      : { ...(remote.item ?? selectedEntry.media), id: selectedEntry.media.id }
     : detailId ? remote.item ?? peekPreview(detailId) ?? (demoMode ? demoById.get(detailId) : undefined) : undefined
   const detailPending = Boolean(identity && !detail && remote.status === 'loading')
   const detailMessages = [
-    identity ? catalogMessage(identity.provider === 'igdb' ? 'IGDB' : 'TMDB', remote.status, remote.retryAfter) : '',
+    identity ? catalogMessage(providerDisplayName(identity.provider), remote.status, remote.retryAfter) : '',
     remote.cacheError ? offlineCacheError : '',
   ].filter(Boolean)
   const origin = detailId ? readDetailOrigin(location.state) : undefined
-  const browse = origin?.url ?? (detailId ? '' : location.pathname + location.search)
-  const [path, query] = browse.split('?')
+  const browse = origin?.url ?? (detailId ? '' : location.pathname + location.search + location.hash)
+  const [browseUrl, hash] = browse.split('#')
+  const [path, query] = browseUrl.split('?')
   const browseParams = new URLSearchParams(query)
   const rawStatus = browseParams.get('status')
   const defaultStatus = rawStatus === 'Watchlist' ? rawStatus : statuses.find((status) => status === rawStatus) ?? null
@@ -110,8 +127,9 @@ export function App() {
     if (last?.key === location.key) return
     previous.current = { key: location.key, origin }
     if (!last && !detailId) return
+    if (last) setLogOpen(false)
 
-    if (!detailId && last?.origin?.url === location.pathname + location.search) {
+    if (!detailId && last?.origin?.url === location.pathname + location.search + location.hash) {
       window.scrollTo(0, last.origin.scrollY)
       const trigger = document.getElementById(last.origin.triggerId)
       if (trigger) {
@@ -126,7 +144,7 @@ export function App() {
       ? document.getElementById('catalog-search')
       : main.current?.querySelector<HTMLElement>('.page:not([hidden]) h1')
     focus?.focus({ preventScroll: true })
-  }, [detailId, location.key, location.pathname, location.search, origin, path, state.status, detailPending])
+  }, [detailId, location.key, location.pathname, location.search, location.hash, origin, path, state.status, detailPending])
 
   function changeTheme(value: Theme) {
     setTheme(value)
@@ -139,10 +157,26 @@ export function App() {
   }
 
   useEffect(() => {
+    // Let the visible screen load first, then refresh the shelves people open next.
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => void warmCatalog(controller.signal), 1500)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [])
+
+  useEffect(() => {
     if (!announcement.id) return
     const timer = window.setTimeout(() => setDismissedAnnouncement(announcement.id), 4000)
     return () => window.clearTimeout(timer)
   }, [announcement.id])
+
+  useEffect(() => {
+    if (!highlightId) return
+    const timer = window.setTimeout(() => setHighlightId(undefined), duration.slow * 1000)
+    return () => window.clearTimeout(timer)
+  }, [highlightId, announcement.id])
 
   function announce(message: string) {
     setAnnouncement((previous) => ({ message, id: previous.id + 1 }))
@@ -151,12 +185,13 @@ export function App() {
   const editing = session ? entries.get(session.media.id) ?? [...entries.values()].find((entry) => mediaKey(entry.media) === mediaKey(session.media)) : undefined
 
   function openLog(media: Media, trigger: HTMLElement, initialStatus?: Status) {
-    setSession((previous) => ({ key: (previous?.key ?? 0) + 1, media, trigger, initialStatus }))
+    setSession((previous) => ({ key: (previous?.key ?? 0) + 1, media, trigger, initialStatus, locationKey: location.key }))
     setLogOpen(true)
   }
 
   async function save(media: Media, draft: LogDraft) {
     const { id, created } = await library.save(media, draft)
+    if (created) keepLibrary()
     setHighlightId(id)
     announce(created ? `${media.title} saved to Library.` : `Changes to ${media.title} saved.`)
   }
@@ -165,12 +200,12 @@ export function App() {
     const { id, changed } = await library.completeToday(media)
     if (!changed) return
     setHighlightId(id)
-    announce(`${media.title} marked ${media.format === 'GAME' ? 'played' : 'watched'}.`)
+    announce(`${media.title} marked ${media.format === 'BOOK' ? 'read' : media.format === 'GAME' ? 'played' : 'watched'}.`)
   }
 
-  async function setEpisode(entry: LibraryEntry, episodes: readonly Episode[], watched: boolean) {
+  async function setEpisode(entry: LibraryEntry, episodes: readonly Episode[], watched: boolean, season?: number) {
     await library.setEpisode(entry.media.id, episodes, watched)
-    const name = episodes.length === 1 ? episodes[0].title : `Season ${episodes[0].season}`
+    const name = season === undefined ? episodes[0].title : season === 0 ? 'Specials' : `Season ${season}`
     announce(`${name} marked ${watched ? 'watched' : 'unwatched'}.`)
   }
 
@@ -196,21 +231,26 @@ export function App() {
 
   return (
     <MotionConfig reducedMotion={animate ? 'never' : 'always'}>
-      <div className="app-shell" style={motionProperties} data-motion={animate ? 'full' : 'reduced'} data-popular-view={path === '/popular' && !detailId || undefined}>
+      <div className="app-shell" data-motion={animate ? 'full' : 'reduced'} data-popular-view={path === '/popular' && !detailId || undefined}>
         <a href="#main-content" className="skip-link">Skip to content</a>
         <aside className="sidebar">
           <Link to="/" className="wordmark"><LogoMark size={iconSize.display} /> Epilog</Link>
           <nav aria-label="Primary">
             {navigation.map(({ to, label, Icon }) => (
-              <NavLink key={to} to={to} end className={linkProps}><Icon size={iconSize.lg} /> {label}</NavLink>
+              <NavLink key={to} to={to} end className={linkProps}>
+                {({ isActive }) => <>{isActive && <SelectionIndicator id="sidebar-selection" />}<Icon size={iconSize.lg} /> {label}</>}
+              </NavLink>
             ))}
           </nav>
         </aside>
         <header className="mobile-header">
           <Link to="/" className="wordmark"><LogoMark size={iconSize.xl} /> Epilog</Link>
           <div>
-            <NavLink to="/search" className="icon-button" aria-label="Search"><MagnifyingGlassIcon size={iconSize.sm} /></NavLink>
-            <NavLink to="/settings" className="icon-button" aria-label="Settings"><GearSixIcon size={iconSize.sm} /></NavLink>
+            {navigation.filter(({ mobile }) => !mobile).map(({ to, label, Icon }) => (
+              <NavLink key={to} to={to} className="icon-button header-link" aria-label={label}>
+                {({ isActive }) => <>{isActive && <SelectionIndicator id="header-selection" />}<Icon size={iconSize.sm} /></>}
+              </NavLink>
+            ))}
           </div>
         </header>
         <main id="main-content" className="main-content" tabIndex={-1} ref={main}>
@@ -224,22 +264,15 @@ export function App() {
               </motion.div>
             ) : null}
             {path && state.status === 'ready' ? (
-              <motion.div
-                className="page"
-                key={browse}
-                hidden={Boolean(detailId)}
-                variants={crossfade}
-                initial={animate ? 'hidden' : false}
-                animate="visible"
-              >
+              <div className="page" key={browse} hidden={Boolean(detailId)}>
                 {path === '/' ? <Dashboard entries={entries} onLog={openLog} />
                   : path === '/library' ? <Library entries={entries} view={browseParams.get('view')} defaultStatus={defaultStatus} defaultCategory={defaultCategory} highlightId={highlightId} />
                   : path === '/popular' ? <Popular entries={entries} query={query ?? ''} onLog={openLog} onComplete={completeToday} onPreference={savePreference} />
-                  : path === '/search' ? <Search entries={entries} onLog={(media, trigger) => openLog(media, trigger, browseParams.get('action') === 'watch' ? 'Completed' : undefined)} />
-                  : path === '/compare' ? <Compare entries={entries} onLog={openLog} />
+                  : path === '/search' ? <Search entries={entries} onLog={(media, trigger, status) => openLog(media, trigger, status ?? (browseParams.get('action') === 'watch' ? 'Completed' : undefined))} />
+                  : path === '/compare' ? <Compare hash={hash} entries={entries} onLog={openLog} />
                   : path === '/settings' ? <Settings theme={theme} onTheme={changeTheme} storageError={storageError} onRestore={(count) => announce(count ? 'Backup restored.' : 'Backup reviewed. Your library is already up to date.')} />
                   : <MissingPage />}
-              </motion.div>
+              </div>
             ) : null}
             {detailId && state.status === 'ready' ? (
               <motion.div key={detailId} className="page" variants={crossfade} initial={animate && !origin ? 'hidden' : false} animate="visible">
@@ -254,22 +287,23 @@ export function App() {
                     onRemove={remove}
                   />
                 ) : <MissingPage title={identity && remote.status !== 'missing' ? 'Title temporarily unavailable' : 'Title not found'} />}
-                {detailMessages.length && !detailPending ? (
-                  <CatalogFeedback messages={detailMessages} retry={connected ? () => setRetryDetail((value) => value + 1) : undefined} loading={remote.status === 'loading'} />
-                ) : null}
+                <CatalogFeedback messages={detailPending ? [] : detailMessages} ready={remote.status === 'ready'}
+                  retry={connected ? () => setRetryDetail((value) => value + 1) : undefined} loading={remote.status === 'loading'} />
               </motion.div>
             ) : null}
           </LayoutGroup>
         </main>
         <nav className="mobile-nav" aria-label="Primary">
           {navigation.filter(({ mobile }) => mobile).map(({ to, label, Icon }) => (
-            <NavLink key={to} to={to} end className={linkProps}><Icon size={iconSize.lg} /> {label}</NavLink>
+            <NavLink key={to} to={to} end className={linkProps}>
+              {({ isActive }) => <>{isActive && <SelectionIndicator id="dock-selection" />}<Icon size={iconSize.lg} /> {label}</>}
+            </NavLink>
           ))}
         </nav>
         {import.meta.env.PROD ? <Suspense fallback={null}><InstallStatus /></Suspense> : null}
         <LogDialog
           session={session}
-          open={logOpen}
+          open={logOpen && session?.locationKey === location.key}
           entry={editing}
           onClose={() => setLogOpen(false)}
           onSave={save}

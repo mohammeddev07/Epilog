@@ -42,6 +42,12 @@ export const demoCatalog: readonly Media[] = [
     id: 'driftwood-archive', title: 'Driftwood Archive', format: 'GAME', year: 2026,
     genres: ['Exploration'], description: 'Restore an island archive one salvaged letter at a time.',
   },
+  { id: 'the-glass-orchard', year: 2024, title: 'The Glass Orchard', format: 'BOOK', bookType: 'Novel', genres: ['Mystery'], description: 'A botanist inherits an orchard with a missing season.' },
+  { id: 'small-steps-daily', year: 2023, title: 'Small Steps Daily', format: 'BOOK', bookType: 'Nonfiction', genres: ['Self-help'], description: 'A practical guide to building habits that last.' },
+  { id: 'a-letter-from-tomorrow', year: 2025, title: 'A Letter from Tomorrow', format: 'BOOK', bookType: 'Light Novel', genres: ['Fantasy'], description: 'A student receives letters written one day in the future.' },
+  { id: 'ink-and-moon', year: 2022, title: 'Ink and Moon', format: 'BOOK', bookType: 'Manga', genres: ['Adventure'], description: 'Two apprentices chart a coast that changes with the tide.' },
+  { id: 'the-last-teahouse', year: 2027, title: 'The Last Teahouse', format: 'BOOK', bookType: 'Manhwa', genres: ['Fantasy'], description: 'An apprentice keeps a teahouse open between two worlds.' },
+  { id: 'river-of-stars', year: 2021, title: 'River of Stars', format: 'BOOK', bookType: 'Manhua', genres: ['Adventure'], description: 'A boat builder follows an ancient map upstream.' },
 ]
 
 export const demoById = new Map(demoCatalog.map((media) => [media.id, media]))

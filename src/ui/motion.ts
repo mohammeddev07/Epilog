@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react'
 import type { CSSProperties } from 'react'
 import type { Transition, Variants } from 'motion/react'
 
-export const duration = { fast: 0.15, filter: 0.18, sheet: 0.24, base: 0.25, slow: 0.4 }
+export const duration = { fast: 0.15, filter: 0.18, sheet: 0.24, base: 0.25, slow: 0.4, hold: 0.5 }
 export const easeOut = [0.2, 0.75, 0.25, 1] as const
 export const layoutSpring = { type: 'spring', stiffness: 380, damping: 34, mass: 0.85 } satisfies Transition
 // Shared poster flight: near-critical (ζ≈0.97) so the art lands without a visible bounce in ~420ms.
@@ -11,6 +11,7 @@ export const carouselSpring = { type: 'spring', stiffness: 290, damping: 30, mas
 const stagger = 0.035
 
 export const motionProperties = {
+  '--motion-hold': `${duration.hold}s`,
   '--motion-fast': `${duration.fast}s`,
   '--motion-filter': `${duration.filter}s`,
   '--motion-sheet': `${duration.sheet}s`,

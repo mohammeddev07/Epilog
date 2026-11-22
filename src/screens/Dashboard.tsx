@@ -1,3 +1,5 @@
+import { BookTypeFilter } from '../ui/BookTypeFilter'
+import type { BookType } from '../domain/books'
 import { ArrowRightIcon, MagnifyingGlassIcon } from '@phosphor-icons/react'
 import { useState } from 'react'
 import { Link } from 'react-router'
@@ -17,6 +19,7 @@ export function Dashboard({ entries, onLog }: {
   onLog: OpenLog
 }) {
   const [category, setCategory] = useState<DiscoverSection>(defaultPopularCategory)
+  const [bookType, setBookType] = useState<BookType>()
   const [period, setPeriod] = useState(defaultReleasePeriod)
   const recent = [...entries.values()].sort((a, b) => b.updatedAt - a.updatedAt)
   const inProgress = recent.filter((entry) => entry.status === 'In progress').slice(0, 3)
@@ -27,13 +30,13 @@ export function Dashboard({ entries, onLog }: {
       <header className="page-intro dashboard-intro">
         <div>
           <h1 tabIndex={-1}>Dashboard</h1>
-          <p>{entries.size ? 'Pick up where you left off.' : 'Start your library with something you’ve watched or played.'}</p>
+          <p>{entries.size ? 'Pick up where you left off.' : 'Start your library with a title you’ve watched, played, or read.'}</p>
         </div>
       </header>
 
       {inProgress.length ? (
         <section className="shelf" aria-labelledby="continue-heading">
-          <h2 id="continue-heading">Continue watching &amp; playing</h2>
+          <h2 id="continue-heading">Continue where you left off</h2>
           <ProgressList entries={inProgress} label="In progress" />
         </section>
       ) : null}
@@ -47,16 +50,17 @@ export function Dashboard({ entries, onLog }: {
       {!entries.size ? (
         <Link className="search-prompt" to="/search">
           <MagnifyingGlassIcon size={iconSize.sm} />
-          <span>Search movies, TV, anime, and games</span>
+          <span>Search movies, TV, anime, games, and books</span>
           <ArrowRightIcon size={iconSize.md} />
         </Link>
       ) : null}
 
       {browseModes.map((mode) => {
-        const query: BrowseQuery = mode === 'release' ? { mode, period } : { mode }
+        const query: BrowseQuery = { ...(mode === 'release' ? { mode, period } : { mode }), bookType: category === 'Books' ? bookType : undefined }
         return (
           <BrowseShelf key={mode} category={category} query={query} entries={entries} onLog={onLog}>
             {mode === 'popular' ? <CategoryPicker value={category} options={discoverSections} onChange={setCategory} label={popularTitle + ' categories'} /> : null}
+            {mode === 'popular' && category === 'Books' && <BookTypeFilter value={bookType} onChange={setBookType} />}
             {mode === 'release' ? <ReleaseDatePicker value={period} onChange={setPeriod} /> : null}
           </BrowseShelf>
         )

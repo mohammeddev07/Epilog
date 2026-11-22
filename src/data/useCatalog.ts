@@ -1,5 +1,6 @@
+import type { BookType } from '../domain/books'
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { browseCatalogPath, cleanQuery } from '../domain/catalog'
+import { browseCatalogPath, cleanQuery, defaultPopularCategory, defaultReleasePeriod, discoverSections } from '../domain/catalog'
 import type { BrowseQuery, CatalogPayload, DiscoverSection, Provider } from '../domain/catalog'
 import { catalogKey } from '../domain/identity'
 import type { CatalogIdentity } from '../domain/identity'
@@ -51,6 +52,9 @@ function wait(ms: number, signal: AbortSignal) {
   })
 }
 
+const resourceKey = (path: string, query?: string, cacheVersion?: string) =>
+  cacheVersion ? `${path}:${cacheVersion}` : query === undefined ? path : `${path}:${query.toLowerCase()}`
+
 function useResource(
   path: string,
   provider: Provider,
@@ -60,7 +64,7 @@ function useResource(
   query?: string,
   cacheVersion?: string,
 ) {
-  const key = cacheVersion ? `${path}:${cacheVersion}` : query === undefined ? path : `${path}:${query.toLowerCase()}`
+  const key = resourceKey(path, query, cacheVersion)
   const connected = useConnection()
   const [state, setState] = useState<State>(statusOnly('', 'idle'))
   const active = enabled && !demoMode
@@ -116,15 +120,51 @@ function useResource(
 
 const minute = 60_000
 
-export function useProviderSearch(provider: Provider, rawQuery: string, retry: number) {
+export function useProviderSearch(provider: Provider, rawQuery: string, retry: number, bookType?: BookType) {
   const query = cleanQuery(rawQuery)
-  return useResource(`search/${provider}`, provider, Boolean(query), 10 * minute, retry, query)
+  return useResource(`search/${provider}${bookType ? '?' + new URLSearchParams({ type: bookType }) : ''}`, provider, Boolean(query), 10 * minute, retry, query)
+}
+
+const browseFreshness = 20 * minute
+
+function browseResource(section: DiscoverSection, query: BrowseQuery, page = 1) {
+  const path = browseCatalogPath(section, query, page)
+  const cacheVersion = query.mode === 'popular' ? 'weekly-v2' : 'browse-v1'
+  const provider: Provider = section === 'Books' ? 'openlibrary' : section === 'Games' ? 'igdb' : 'tmdb'
+  return { path, provider, cacheVersion, key: resourceKey(path, undefined, cacheVersion) }
 }
 
 export function useBrowsePage(section: DiscoverSection, query: BrowseQuery, page: number, retry: number, enabled: boolean) {
-  const path = browseCatalogPath(section, query, page)
-  const cacheVersion = query.mode === 'popular' ? 'weekly-v2' : 'browse-v1'
-  return useResource(path, section === 'Games' ? 'igdb' : 'tmdb', enabled, 20 * minute, retry, undefined, cacheVersion)
+  const { path, provider, cacheVersion } = browseResource(section, query, page)
+  return useResource(path, provider, enabled, browseFreshness, retry, undefined, cacheVersion)
+}
+
+const startupShelves: readonly (readonly [DiscoverSection, BrowseQuery])[] = [
+  ...discoverSections.map((section) => [section, { mode: 'popular' }] as const),
+  [defaultPopularCategory, { mode: 'rated' }],
+  [defaultPopularCategory, { mode: 'anticipated' }],
+  [defaultPopularCategory, { mode: 'release', period: defaultReleasePeriod }],
+]
+
+/**
+ * After startup, refresh the shelves people see first (every category's Popular shelf and the default category's
+ * other Dashboard shelves) so switching tabs or scrolling shows titles at once. Only missing or stale shelves are
+ * fetched, one at a time, and the first failure stops it. Skipped offline, with Data Saver, and in the demo.
+ */
+export async function warmCatalog(signal: AbortSignal) {
+  const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection
+  if (demoMode || !navigator.onLine || connection?.saveData) return
+  for (const [section, query] of startupShelves) {
+    const { path, provider, key } = browseResource(section, query)
+    const cached = await library.readResponse(key).catch(() => undefined)
+    if (cached && Date.now() - cached.writtenAt < browseFreshness) continue
+    try {
+      const data = await fetchCatalog(path, provider, undefined, signal)
+      if ('items' in data && !data.partial) await library.cacheResponse(key, provider, data)
+    } catch {
+      return // Offline, throttled, or closed: each shelf still loads normally when opened.
+    }
+  }
 }
 
 export function useCatalogDetail(identity: CatalogIdentity | undefined, retry: number) {

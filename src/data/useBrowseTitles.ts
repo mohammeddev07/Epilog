@@ -36,7 +36,7 @@ export function useBrowseTitles(category: DiscoverSection, query: BrowseQuery, e
 }
 
 function demoBrowse(category: DiscoverSection, query: BrowseQuery) {
-  const items = demoCatalog.filter((media) => inCategory(media, category))
+  const items = demoCatalog.filter((media) => inCategory(media, category) && (!query.bookType || (media.format === 'BOOK' && media.bookType === query.bookType)))
   if (query.mode === 'release') {
     const { first, last } = releaseYearRange(query.period)
     return items.filter((media) => media.year !== undefined && media.year >= first && media.year <= last)

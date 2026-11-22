@@ -1,3 +1,4 @@
+import { bookTypes } from '../domain/books'
 import { queryLimit } from '../domain/catalog'
 import type { CatalogPayload, Provider } from '../domain/catalog'
 import { catalogCacheAge, parseCatalogKey } from '../domain/identity'
@@ -39,7 +40,7 @@ function isMedia(value: unknown): value is Media {
     (value.aliases !== undefined && !strings(value.aliases)) ||
     (value.year !== undefined && (typeof value.year !== 'number' || !Number.isInteger(value.year))) ||
     (value.poster !== undefined && (typeof value.poster !== 'string' ||
-      !/^https:\/\/(image\.tmdb\.org|images\.igdb\.com)\//.test(value.poster))) ||
+      !/^https:\/\/(image\.tmdb\.org|images\.igdb\.com|covers\.openlibrary\.org)\//.test(value.poster))) ||
     (value.runtime !== undefined && (typeof value.runtime !== 'number' || !Number.isInteger(value.runtime) || value.runtime < 1 || value.runtime > 1500)) ||
     (value.countries !== undefined && (!strings(value.countries) || (value.countries as string[]).some((code) => !/^[A-Z]{2}$/.test(code)))) ||
     (value.language !== undefined && (typeof value.language !== 'string' || !/^[a-z]{2,3}$/.test(value.language)))) return false
@@ -47,6 +48,7 @@ function isMedia(value: unknown): value is Media {
   if (!identity || !isObject(value.identity) || value.identity.provider !== identity.provider ||
     value.identity.entity !== identity.entity || value.identity.id !== identity.id ||
     typeof value.catalogedAt !== 'number' || !Number.isSafeInteger(value.catalogedAt)) return false
+  if (identity.entity === 'work') return value.format === 'BOOK' && bookTypes.some((type) => type === value.bookType)
   if (identity.entity === 'game') return value.format === 'GAME'
   if (identity.entity === 'movie') return value.format === 'MOVIE' && typeof value.anime === 'boolean'
   return value.format === 'SERIES' && typeof value.anime === 'boolean' &&
@@ -69,7 +71,25 @@ export function peekPreview(id: string | undefined) {
   if (media?.identity && media.catalogedAt && media.catalogedAt + catalogCacheAge(media.identity.provider) > Date.now()) return media
 }
 
-export async function fetchCatalog(path: string, provider: Provider, query: string | undefined, signal: AbortSignal): Promise<CatalogPayload> {
+const inflight = new Map<string, Promise<CatalogPayload>>()
+
+/** Reads (shelves, details, seasons) are shared: concurrent callers such as the startup warm-up and a shelf get one request. */
+export function fetchCatalog(path: string, provider: Provider, query: string | undefined, signal: AbortSignal): Promise<CatalogPayload> {
+  if (query !== undefined) return requestCatalog(path, provider, query, signal)
+  let shared = inflight.get(path)
+  if (!shared) {
+    shared = requestCatalog(path, provider, undefined, AbortSignal.timeout(17_000)).finally(() => inflight.delete(path))
+    inflight.set(path, shared)
+  }
+  const request = shared
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason)
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+    request.then(resolve, reject)
+  })
+}
+
+async function requestCatalog(path: string, provider: Provider, query: string | undefined, signal: AbortSignal): Promise<CatalogPayload> {
   const until = backoffs.get(provider) ?? 0
   if (until > Date.now()) throw new CatalogResponseError(429, Math.ceil((until - Date.now()) / 1000))
   if (query !== undefined && (!query || query.length > queryLimit)) throw new CatalogResponseError(400)
