@@ -1,3 +1,5 @@
+export const savedBookTitle = 'Saved book'
+
 export const bookTypes = ['Novel', 'Nonfiction', 'Light Novel', 'Manga', 'Manhwa', 'Manhua'] as const
 export type BookType = (typeof bookTypes)[number]
 export const bookTypeLabels: Record<BookType, string> = {

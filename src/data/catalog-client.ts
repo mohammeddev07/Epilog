@@ -11,6 +11,10 @@ export class CatalogResponseError extends Error {
   }
 }
 
+/** Worth retrying later: offline, timeouts, throttling and server errors. Anything else about one title is permanent. */
+export const isTransient = (cause: unknown) =>
+  !(cause instanceof CatalogResponseError) || cause.status === 429 || cause.status >= 500
+
 const backoffs = new Map<Provider, number>()
 const previews = new Map<string, Media>()
 

@@ -1,9 +1,11 @@
 import { DownloadSimpleIcon, UploadSimpleIcon } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { library } from '../data/library'
+import { useSync } from '../data/useSync'
 import { backupFileName, backupSizeLimit } from '../domain/backup'
-import type { RestorePreview } from '../domain/backup'
+import type { Backup, RestorePreview } from '../domain/backup'
+import { localDate } from '../domain/media'
 import { rise, useMotionEnabled } from './motion'
 import { iconSize } from './tokens'
 
@@ -15,6 +17,15 @@ export function BackupPanel({ onRestore }: { onRestore: (count: number) => void 
   const filePicker = useRef<HTMLInputElement>(null)
   const chooseFile = useRef<HTMLButtonElement>(null)
   const animate = useMotionEnabled()
+  const syncState = useSync()
+  const [snapshot, setSnapshot] = useState<{ backup: Backup; savedAt: number }>()
+
+  // Signing in saves the pre-merge snapshot and removing this device's copy clears it; both finish with a sync.
+  useEffect(() => {
+    let live = true
+    void library.mergeSnapshot().then((value) => { if (live) setSnapshot(value) }, () => {})
+    return () => { live = false }
+  }, [syncState])
 
   async function run(operation: () => Promise<void>, fallback: string) {
     setError('')
@@ -28,15 +39,14 @@ export function BackupPanel({ onRestore }: { onRestore: (count: number) => void 
     }
   }
 
-  function download() {
+  function download(backup: () => Promise<Backup>, name = backupFileName()) {
     void run(async () => {
-      const backup = await library.exportBackup()
-      const file = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
+      const file = new Blob([JSON.stringify(await backup(), null, 2)], { type: 'application/json' })
       if (file.size > backupSizeLimit) throw new Error('This library exceeds the 10 MB portable backup limit.')
       const url = URL.createObjectURL(file)
       const link = document.createElement('a')
       link.href = url
-      link.download = backupFileName()
+      link.download = name
       document.body.append(link)
       link.click()
       link.remove()
@@ -70,7 +80,7 @@ export function BackupPanel({ onRestore }: { onRestore: (count: number) => void 
       <h2 id="backup-heading">Backup &amp; Restore</h2>
       <p className="muted">Move your reading progress, history, likes, ratings, and watchlist to another browser. Catalog art isn’t included.</p>
       <div className="action-row">
-        <button type="button" className="button button-secondary" disabled={busy} onClick={download}>
+        <button type="button" className="button button-secondary" disabled={busy} onClick={() => download(library.exportBackup)}>
           <DownloadSimpleIcon size={iconSize.md} /> Export backup
         </button>
         <input
@@ -89,6 +99,12 @@ export function BackupPanel({ onRestore }: { onRestore: (count: number) => void 
           <UploadSimpleIcon size={iconSize.md} /> Choose backup file
         </button>
       </div>
+      {snapshot ? (
+        <button type="button" className="text-action" disabled={busy}
+          onClick={() => download(async () => snapshot.backup, `epilog-library-before-sign-in-${localDate(new Date(snapshot.savedAt))}.json`)}>
+          Export library from before sign-in ({new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(snapshot.savedAt)})
+        </button>
+      ) : null}
       {error ? (
         <p className="form-error" role="alert">{error}</p>
       ) : null}

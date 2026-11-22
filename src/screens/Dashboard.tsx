@@ -35,13 +35,13 @@ export function Dashboard({ entries, onLog }: {
       </header>
 
       {inProgress.length ? (
-        <section className="shelf" aria-labelledby="continue-heading">
+        <section className="shelf progress-row" aria-labelledby="continue-heading">
           <h2 id="continue-heading">Continue where you left off</h2>
           <ProgressList entries={inProgress} label="In progress" />
         </section>
       ) : null}
       {planned.length ? (
-        <section className="shelf" aria-labelledby="backlog-heading">
+        <section className="shelf progress-row" aria-labelledby="backlog-heading">
           <div className="shelf-heading"><h2 id="backlog-heading">Up next</h2><Link to={'/library?' + new URLSearchParams({ status: 'Watchlist', category: primaryCategory(planned[0].media) })} className="text-action">View backlog <ArrowRightIcon size={iconSize.sm} /></Link></div>
           <ProgressList entries={planned} label="Backlog" />
         </section>

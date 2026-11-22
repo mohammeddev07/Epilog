@@ -255,6 +255,26 @@ export function updateEntry(media: Media, current: LibraryEntry | undefined, dra
   }
 }
 
+/** The completion "Remove watch" deletes: the most recent one. */
+export function latestCompletion(entry?: LibraryEntry) {
+  return entry?.completions.toSorted((a, b) => a.date.localeCompare(b.date)).at(-1)
+}
+
+/** Undoes the latest completion. Earlier ones keep the title completed; otherwise it drops back to In progress, or untracked. */
+export function removeCompletion(entry: LibraryEntry, now: number): LibraryEntry {
+  if (entry.status !== 'Completed') return entry
+  const latest = latestCompletion(entry)
+  const completions = entry.completions.filter((item) => item !== latest)
+  const progress = entry.watched.length > 0 || Boolean(entry.reading?.count) || Boolean(entry.playtimeMinutes)
+  return { ...entry, completions, status: completions.length ? 'Completed' : progress ? 'In progress' : undefined, updatedAt: now }
+}
+
+/** Nothing left worth keeping: no status, preference or progress. */
+export function isEmptyEntry(entry: LibraryEntry) {
+  return !entry.status && !entry.liked && !entry.rating && !entry.watchlisted && !entry.completions.length &&
+    !entry.watched.length && !entry.reading && !entry.playtimeMinutes
+}
+
 export function updatePreference(media: Media, current: LibraryEntry | undefined, change: PreferenceChange, now: number): LibraryEntry {
   const entry = current ?? { media, completions: [], watched: [], unwatched: [], updatedAt: now }
   switch (change.kind) {

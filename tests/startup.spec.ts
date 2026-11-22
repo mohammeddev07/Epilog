@@ -14,6 +14,8 @@ const titles = {
 test('warms each category and the first Dashboard shelves at startup, so they open without waiting', async ({ page }) => {
   const requested: string[] = []
   let catalogUp = true
+  const synced: string[] = []
+  page.on('request', (request) => { if (new URL(request.url()).pathname.startsWith('/api/sync')) synced.push(request.url()) })
   await page.route((url) => url.pathname.startsWith('/api/catalog/'), async (route) => {
     const url = new URL(route.request().url())
     requested.push(url.pathname.replace('/api/catalog/', '') + url.search)
@@ -43,4 +45,5 @@ test('warms each category and the first Dashboard shelves at startup, so they op
   await expect(page.getByRole('list', { name: 'Popular This Week', exact: true }).getByRole('link', { name: /Warm movie/ })).toBeVisible()
   await page.waitForTimeout(2000) // past the warm-up delay
   expect(requested.length).toBe(before)
+  expect(synced).toEqual([]) // a guest never syncs
 })

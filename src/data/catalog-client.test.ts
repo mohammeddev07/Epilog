@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { fetchCatalog } from './catalog-client'
+import { CatalogResponseError, fetchCatalog, isTransient } from './catalog-client'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -24,4 +24,11 @@ it('shares one in-flight read between callers, and one caller leaving does not c
   await fetchCatalog('popular/movies', 'tmdb', undefined, new AbortController().signal)
   await Promise.all([1, 2].map(() => fetchCatalog('search/tmdb', 'tmdb', 'Shared', new AbortController().signal)))
   expect(upstream).toHaveBeenCalledTimes(4)
+})
+
+it('treats offline, timeouts, throttling and server errors as transient, and other client errors as permanent', () => {
+  for (const cause of [new TypeError('Failed to fetch'), new DOMException('timeout', 'TimeoutError'), new CatalogResponseError(429), new CatalogResponseError(500), new CatalogResponseError(502)]) {
+    expect(isTransient(cause)).toBe(true)
+  }
+  for (const status of [400, 403, 404]) expect(isTransient(new CatalogResponseError(status))).toBe(false)
 })

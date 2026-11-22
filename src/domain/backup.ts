@@ -1,5 +1,6 @@
-import { readingText } from './books'
+import { readingText, savedBookTitle } from './books'
 import type { BookType, ReadingProgress } from './books'
+import { parseCatalogKey } from './identity'
 import { episodeKey, localDate } from './media'
 import type { Completion, EpisodePosition, Media, Status, TitlePreferences } from './media'
 
@@ -13,6 +14,7 @@ export interface OwnedMedia {
   anime: boolean
   bookType?: BookType
   label?: string
+  catalogRef?: string
 }
 
 export interface EpisodeActivity extends EpisodePosition {
@@ -53,7 +55,13 @@ export interface RestorePreview {
 }
 
 export function buildBackup(entries: BackupEntry[]): Backup {
-  return { format: backupFormat, version: backupVersion, entries }
+  const portable = entries.map(({ media: { id, format, anime, bookType, label, catalogRef }, ...entry }) => {
+    const bookRef = format === 'BOOK' && parseCatalogKey(catalogRef ?? id)?.entity === 'work' ? catalogRef ?? id : undefined
+    const media = { id, format, anime, bookType, label: bookRef && label === savedBookTitle ? undefined : label }
+    // The id usually is the book's reference. Keep it separately if sync has assigned a different id.
+    return { ...entry, media: bookRef && bookRef !== id ? { ...media, catalogRef: bookRef } : media }
+  })
+  return { format: backupFormat, version: backupVersion, entries: portable }
 }
 
 export function backupFileName() {
@@ -96,7 +104,11 @@ export function planRestore(backup: Backup, current: BackupEntry[], preferBackup
     }
 
     const status = choose('Status', saved.status, incoming.status)
-    const label = choose('Backup label', saved.media.label, incoming.media.label)
+    const catalogRef = saved.media.catalogRef ?? incoming.media.catalogRef
+    if (catalogRef !== saved.media.catalogRef) changed = true
+    const catalogBook = saved.media.format === 'BOOK' && parseCatalogKey(catalogRef ?? owned.id)?.entity === 'work'
+    const label = catalogBook && !incoming.media.label
+      ? saved.media.label : choose('Backup label', saved.media.label, incoming.media.label)
     const playtimeMinutes = choose('Minutes played', saved.playtimeMinutes, incoming.playtimeMinutes)
     const bookType = choose('Book type', saved.media.bookType, incoming.media.bookType)
     let reading = saved.reading
@@ -131,7 +143,7 @@ export function planRestore(backup: Backup, current: BackupEntry[], preferBackup
     if (!changed) return []
     return [{
       ...saved,
-      media: { ...saved.media, label, bookType },
+      media: { ...saved.media, label, bookType, catalogRef },
       reading,
       status,
       playtimeMinutes,
