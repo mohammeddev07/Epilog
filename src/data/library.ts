@@ -7,15 +7,26 @@ import type { Backup, BackupEntry, EpisodeActivity, OwnedMedia, RestorePreview }
 import type { CatalogPayload, Provider } from '../domain/catalog'
 import { catalogCacheAge, catalogKey, parseCatalogKey } from '../domain/identity'
 import { episodeKey, isEmptyEntry, localDate, manualEpisode, removeCompletion, updateEntry, updateEpisode, updatePreference } from '../domain/media'
-import type { Completion, Episode, LibraryEntry, LogDraft, Media, PreferenceChange, TitlePreferences } from '../domain/media'
+import type { Completion, Episode, EpisodePosition, LibraryEntry, LogDraft, Media, PreferenceChange, Rating, TitlePreferences } from '../domain/media'
+import { groupNames, mergeChange } from '../domain/sync'
+import type { EntryData, GroupName, SyncChange } from '../domain/sync'
 import { demoById } from './demo'
 
-type EntryRow = Pick<BackupEntry, 'status' | 'createdAt' | 'updatedAt' | 'reading' | 'playtimeMinutes'> & TitlePreferences & { mediaId: string }
+type EntryRow = Pick<BackupEntry, 'status' | 'createdAt' | 'updatedAt' | 'reading' | 'playtimeMinutes'> & TitlePreferences & {
+  mediaId: string
+  groupsAt?: Partial<Record<GroupName, number>>
+}
 type CompletionRow = Completion & { mediaId: string }
 type EpisodeRow = EpisodeActivity & { mediaId: string }
 type ResponseRow = { key: string; payload: CatalogPayload; writtenAt: number; expiresAt: number }
+type OutboxKey = { kind: SyncChange['kind']; id: string }
+type OutboxRow = OutboxKey & { at: number }
+type Account = { sub: string; email: string; name: string; cursor: number; lastSyncAt?: number }
+type Meta = { account: Account; lastSub: string; mergeSnapshot: { backup: Backup; expiresAt: number } }
+type MetaRow = { [K in keyof Meta]: { key: K; value: Meta[K] } }[keyof Meta]
 
 const responseCacheLimit = 64
+const mergeSnapshotAge = 30 * 24 * 60 * 60_000
 
 function trackingFields(row: EntryRow) {
   const { status, createdAt, updatedAt, reading, playtimeMinutes, liked, rating, watchlisted } = row
@@ -24,6 +35,42 @@ function trackingFields(row: EntryRow) {
 
 type CatalogRow = { key: string; mediaId: string; media: Media; expiresAt: number }
 
+function groupValues(row: Omit<EntryRow, 'groupsAt'> | undefined, label: string | undefined): Record<GroupName, unknown> {
+  return { progress: [row?.status, row?.reading, row?.playtimeMinutes], liked: row?.liked, rating: row?.rating, watchlisted: row?.watchlisted, label }
+}
+
+/** Stamps `at` on the groups whose values changed; rows saved before v3 fall back to their `updatedAt`. */
+function stampGroups(before: EntryRow | undefined, beforeLabel: string | undefined, after: Omit<EntryRow, 'groupsAt'>, afterLabel: string | undefined, at: number) {
+  const old = groupValues(before, beforeLabel)
+  const next = groupValues(after, afterLabel)
+  return Object.fromEntries(groupNames.map((name) => [name, before && JSON.stringify(old[name]) === JSON.stringify(next[name])
+    ? before.groupsAt?.[name] ?? before.updatedAt : at])) as Record<GroupName, number>
+}
+
+function entryData(row: EntryRow, media: OwnedMedia): EntryData {
+  const at = (name: GroupName) => row.groupsAt?.[name] ?? row.updatedAt
+  return {
+    format: media.format, anime: media.anime, bookType: media.bookType, catalogRef: media.catalogRef, createdAt: row.createdAt,
+    groups: {
+      progress: { status: row.status, reading: row.reading, playtimeMinutes: row.playtimeMinutes, at: at('progress') },
+      liked: { value: row.liked, at: at('liked') },
+      rating: { value: row.rating, at: at('rating') },
+      watchlisted: { value: row.watchlisted, at: at('watchlisted') },
+      label: { value: media.label, at: at('label') },
+    },
+  }
+}
+
+const latestAt = (data: EntryData) => Math.max(...groupNames.map((name) => data.groups[name].at))
+const episodeId = (mediaId: string, { season, number }: EpisodePosition) => `${mediaId}:${season}:${number}`
+
+/** Media ids may contain ':', so read the season and number from the right. */
+function episodeRowKey(id: string): [string, number, number] {
+  const last = id.lastIndexOf(':')
+  const middle = id.lastIndexOf(':', last - 1)
+  return [id.slice(0, middle), Number(id.slice(middle + 1, last)), Number(id.slice(last + 1))]
+}
+
 class LibraryDatabase extends Dexie {
   declare media: Table<OwnedMedia, string>
   declare entries: Table<EntryRow, string>
@@ -31,8 +78,10 @@ class LibraryDatabase extends Dexie {
   declare episodes: Table<EpisodeRow, [string, number, number]>
   declare catalog: Table<CatalogRow, string>
   declare responses: Table<ResponseRow, string>
+  declare outbox: Table<OutboxRow, [string, string]>
+  declare meta: Table<MetaRow, string>
 
-  constructor(name: string) {
+  constructor(name: string, clock: () => number) {
     super(name)
     this.version(1).stores({
       media: 'id',
@@ -42,6 +91,10 @@ class LibraryDatabase extends Dexie {
       catalog: 'key,&mediaId,expiresAt',
     })
     this.version(2).stores({ responses: 'key,writtenAt,expiresAt' })
+    this.version(3).stores({ media: 'id,catalogRef', outbox: '[kind+id],at', meta: 'key' }).upgrade(async (tx) => {
+      const links: CatalogRow[] = await tx.table('catalog').where('expiresAt').above(clock()).toArray()
+      for (const { key, mediaId } of links) await tx.table('media').update(mediaId, { catalogRef: key })
+    })
   }
 }
 
@@ -70,6 +123,7 @@ function displayMedia(owned: OwnedMedia, snapshot?: Media): Media {
     title: owned.label ?? 'Saved title',
     description: '',
     genres: [],
+    identity: owned.catalogRef ? parseCatalogKey(owned.catalogRef) : undefined,
   }
   if (owned.format === 'BOOK') throw new Error('This book is missing its type.')
   return owned.format === 'GAME' ? { ...base, format: owned.format } : { ...base, format: owned.format, anime: owned.anime }
@@ -105,8 +159,20 @@ function libraryEntry(entry: BackupEntry, snapshot?: Media): LibraryEntry {
 }
 
 export function createLibrary(name = 'epilog', clock = Date.now) {
-  const db = new LibraryDatabase(name)
+  const db = new LibraryDatabase(name, clock)
   const records = [db.media, db.entries, db.completions, db.episodes]
+  const tables = [...records, db.catalog, db.outbox, db.meta]
+
+  async function getMeta<K extends keyof Meta>(key: K) {
+    return (await db.meta.get(key))?.value as Meta[K] | undefined
+  }
+
+  /** Queues records for sync, only while signed in. Call inside the write's transaction. */
+  async function enqueue(keys: OutboxKey[], at: number) {
+    if (!keys.length || !await db.meta.get('account')) return 0
+    await db.outbox.bulkPut(keys.map((key) => ({ ...key, at })))
+    return keys.length
+  }
 
   async function readEntries(): Promise<BackupEntry[]> {
     const [media, entries, completionRows, episodeRows] = await Promise.all([
@@ -160,15 +226,15 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
   }
 
   async function writeEntry(media: Media, update: (current: LibraryEntry | undefined, now: number) => LibraryEntry) {
-    return db.transaction('rw', [...records, db.catalog], async () => {
+    return db.transaction('rw', tables, async () => {
       const now = clock()
       const key = media.identity ? catalogKey(media.identity) : undefined
       if (key && !parseCatalogKey(key)) throw new Error('This title has an invalid catalog reference.')
       const existingLink = key ? await db.catalog.get(key) : undefined
-      const existing = await db.media.get(media.id)
-      const id = existing?.id ?? (existingLink && existingLink.expiresAt > now ? existingLink.mediaId : undefined) ??
-        (key && media.format !== 'BOOK' ? crypto.randomUUID() : media.id)
-      const owned = existing ?? await db.media.get(id) ?? { id, format: media.format, anime: Boolean(media.anime) }
+      const owned = await db.media.get(media.id) ?? (key ? await db.media.where({ catalogRef: key }).first() : undefined) ??
+        { id: key && media.format !== 'BOOK' ? crypto.randomUUID() : media.id, format: media.format, anime: Boolean(media.anime) }
+      const { id } = owned
+      const before = await db.entries.get(id)
       const stored = await storedEntry(id, owned)
       const updatedAt = Math.max(now, stored?.updatedAt ?? 0)
       const current = stored ? libraryEntry(stored, media) : undefined
@@ -178,8 +244,9 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
         throw new Error('Enter a valid book title and choose a book type.')
       }
       const book = entry.media.format === 'BOOK' ? { bookType: entry.media.bookType, label: entry.media.title } : {}
-      await db.media.put({ id, format: owned.format, anime: owned.anime, label: entry.label, ...book })
-      await db.entries.put({
+      const saved = { id, format: owned.format, anime: owned.anime, catalogRef: key ?? owned.catalogRef, label: entry.label, ...book }
+      await db.media.put(saved)
+      const row = {
         mediaId: id,
         status: entry.status,
         createdAt: stored?.createdAt ?? now,
@@ -189,21 +256,21 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
         liked: entry.liked,
         rating: entry.rating,
         watchlisted: entry.watchlisted,
-      })
+      }
+      await db.entries.put({ ...row, groupsAt: stampGroups(before, owned.label, row, saved.label, updatedAt) })
 
       const kept = new Set(entry.completions.map((completion) => completion.id))
       const dropped = stored?.completions.filter((completion) => !kept.has(completion.id)).map((completion) => completion.id) ?? []
       if (dropped.length) await db.completions.bulkDelete(dropped)
-      for (const completion of entry.completions) {
-        if (!stored?.completions.some((item) => item.id === completion.id)) {
-          await db.completions.add({ ...completion, mediaId: id })
-        }
-      }
-      if (stored && !entry.unwatched.length) {
-        const cleared: [string, number, number][] = stored.episodes.filter(({ watched }) => !watched)
-          .map(({ season, number }) => [id, season, number])
-        if (cleared.length) await db.episodes.bulkDelete(cleared)
-      }
+      const added = entry.completions.filter((completion) => !stored?.completions.some((item) => item.id === completion.id))
+      for (const completion of added) await db.completions.add({ ...completion, mediaId: id })
+      const cleared = stored && !entry.unwatched.length ? stored.episodes.filter(({ watched }) => !watched) : []
+      if (cleared.length) await db.episodes.bulkDelete(cleared.map(({ season, number }): [string, number, number] => [id, season, number]))
+      await enqueue([
+        { kind: 'entry', id },
+        ...[...dropped, ...added.map((completion) => completion.id)].map((completionId) => ({ kind: 'completion' as const, id: completionId })),
+        ...cleared.map((episode) => ({ kind: 'episode' as const, id: episodeId(id, episode) })),
+      ], updatedAt)
       if (media.identity && key && (!existingLink || existingLink.expiresAt <= now)) {
         const catalogedAt = Math.min(now, media.catalogedAt ?? now)
         const expiresAt = catalogedAt + catalogCacheAge(media.identity.provider)
@@ -226,7 +293,7 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
 
   /** "Remove watch": drops the latest completion, and the whole entry if nothing else was tracked. */
   function uncomplete(media: Media) {
-    return db.transaction('rw', [...records, db.catalog], async () => {
+    return db.transaction('rw', tables, async () => {
       let emptied = false
       let completed = false
       const result = await writeEntry(media, (current, now) => {
@@ -248,19 +315,30 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
   /** One episode or a whole season, saved in a single transaction. */
   async function setEpisode(mediaId: string, episode: Episode | readonly Episode[], watched: boolean) {
     const episodes = [episode].flat()
-    return db.transaction('rw', [...records, db.catalog], async () => {
+    return db.transaction('rw', tables, async () => {
       const media = await db.media.get(mediaId)
+      const before = await db.entries.get(mediaId)
       const current = media ? await storedEntry(mediaId, media) : undefined
-      if (!current) throw new Error('This title is no longer in the library.')
+      if (!media || !before || !current) throw new Error('This title is no longer in the library.')
       const now = Math.max(clock(), current.updatedAt)
       const updated = episodes.reduce((entry, item) => updateEpisode(entry, item, watched, now), libraryEntry(current))
       await db.episodes.bulkPut(episodes.map(({ season, number }) => ({ mediaId, season, number, watched, updatedAt: now })))
-      await db.entries.update(mediaId, { updatedAt: now, status: updated.status })
+      const row = { ...before, updatedAt: now, status: updated.status }
+      await db.entries.put({ ...row, groupsAt: stampGroups(before, media.label, row, media.label, now) })
+      await enqueue([{ kind: 'entry', id: mediaId }, ...episodes.map((item) => ({ kind: 'episode' as const, id: episodeId(mediaId, item) }))], now)
     })
   }
 
   async function remove(mediaId: string) {
-    return db.transaction('rw', [...records, db.catalog], async () => {
+    return db.transaction('rw', tables, async () => {
+      const row = await db.entries.get(mediaId)
+      const completionIds = await db.completions.where({ mediaId }).primaryKeys()
+      const episodeKeys = await db.episodes.where({ mediaId }).primaryKeys()
+      await enqueue([
+        { kind: 'entry', id: mediaId },
+        ...completionIds.map((id) => ({ kind: 'completion' as const, id })),
+        ...episodeKeys.map(([, season, number]) => ({ kind: 'episode' as const, id: episodeId(mediaId, { season, number }) })),
+      ], Math.max(clock(), row?.updatedAt ?? 0))
       await db.completions.where({ mediaId }).delete()
       await db.episodes.where({ mediaId }).delete()
       await db.catalog.where({ mediaId }).delete()
@@ -282,16 +360,18 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
   }
 
   async function applyRestore(preview: RestorePreview, preferBackup: boolean) {
-    return db.transaction('rw', records, async () => {
+    return db.transaction('rw', tables, async () => {
       const current = await readEntries()
       if (JSON.stringify(current) !== preview.revision) {
         throw new Error('Your library changed after the preview. Review the backup again before restoring.')
       }
       const restore = planRestore(preview.backup, current, preferBackup)
+      const now = clock()
       for (const item of restore.writes) {
         const mediaId = item.media.id
+        const [beforeMedia, before] = await Promise.all([db.media.get(mediaId), db.entries.get(mediaId)])
         await db.media.put(item.media)
-        await db.entries.put({
+        const row = {
           mediaId,
           status: item.status,
           createdAt: item.createdAt,
@@ -301,9 +381,15 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
           liked: item.liked,
           rating: item.rating,
           watchlisted: item.watchlisted,
-        })
+        }
+        await db.entries.put({ ...row, groupsAt: stampGroups(before, beforeMedia?.label, row, item.media.label, now) })
         await db.completions.bulkPut(item.completions.map((completion) => ({ ...completion, mediaId })))
         await db.episodes.bulkPut(item.episodes.map((episode) => ({ ...episode, mediaId })))
+        await enqueue([
+          { kind: 'entry', id: mediaId },
+          ...item.completions.map(({ id }) => ({ kind: 'completion' as const, id })),
+          ...item.episodes.map((episode) => ({ kind: 'episode' as const, id: episodeId(mediaId, episode) })),
+        ], now)
       }
       return restore.writes.length
     })
@@ -348,9 +434,203 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
     })
   }
 
+  function account() {
+    return getMeta('account')
+  }
+
+  /** `undefined` signs out: the outbox is dropped, the library is kept and remembered as `lastSub`'s. */
+  async function setAccount(value: { sub: string; email: string; name: string } | undefined) {
+    await db.transaction('rw', db.meta, db.outbox, async () => {
+      const current = await getMeta('account')
+      if (value) {
+        await db.meta.put({ key: 'account', value: current?.sub === value.sub ? { ...current, ...value } : { ...value, cursor: 0 } })
+        return
+      }
+      await db.outbox.clear()
+      await db.meta.delete('account')
+      if (current) await db.meta.put({ key: 'lastSub', value: current.sub })
+    })
+  }
+
+  function lastSub() {
+    return getMeta('lastSub')
+  }
+
+  async function setCursor(cursor: number, at: number) {
+    await db.transaction('rw', db.meta, async () => {
+      const current = await getMeta('account')
+      if (current) await db.meta.put({ key: 'account', value: { ...current, cursor, lastSyncAt: at } })
+    })
+  }
+
+  /** The record's change rebuilt from local state; a queued record with no state is a tombstone. */
+  async function currentChange({ kind, id }: OutboxKey): Promise<SyncChange | undefined> {
+    const queued = await db.outbox.get([kind, id])
+    if (kind === 'entry') {
+      const [row, media] = await Promise.all([db.entries.get(id), db.media.get(id)])
+      if (row && media) {
+        const data = entryData(row, media)
+        return { kind, id, data, at: latestAt(data) }
+      }
+    } else if (kind === 'completion') {
+      const row = await db.completions.get(id)
+      if (row) return { kind, id, data: { mediaId: row.mediaId, date: row.date }, at: queued?.at ?? 0 }
+    } else {
+      const row = await db.episodes.get(episodeRowKey(id))
+      if (row) return { kind, id, data: { mediaId: row.mediaId, season: row.season, number: row.number, watched: row.watched }, at: row.updatedAt }
+    }
+    return queued && { kind, id, data: null, at: queued.at } as SyncChange
+  }
+
+  async function pendingChanges(limit: number) {
+    return db.transaction('r', tables, async () => {
+      const queued = await db.outbox.orderBy('at').limit(limit).toArray()
+      return Promise.all(queued.map(async (key) => (await currentChange(key))!))
+    })
+  }
+
+  /** Drops each sent change from the outbox unless the record changed after it was read. */
+  async function acknowledge(changes: readonly SyncChange[]) {
+    await db.transaction('rw', tables, async () => {
+      for (const change of changes) {
+        if (JSON.stringify(await currentChange(change)) === JSON.stringify(change)) await db.outbox.delete([change.kind, change.id])
+      }
+    })
+  }
+
+  /** Writes a merged change to the local tables without queuing it. */
+  async function writeChange(change: SyncChange) {
+    if (change.kind === 'completion') {
+      if (change.data) await db.completions.put({ id: change.id, ...change.data })
+      else await db.completions.delete(change.id)
+    } else if (change.kind === 'episode') {
+      if (change.data) await db.episodes.put({ ...change.data, updatedAt: change.at })
+      else await db.episodes.delete(episodeRowKey(change.id))
+    } else if (!change.data) {
+      await db.catalog.where({ mediaId: change.id }).delete()
+      await db.entries.delete(change.id)
+      await db.media.delete(change.id)
+    } else {
+      const { id, data } = change
+      const { progress, liked, rating, watchlisted, label } = data.groups
+      const before = await db.entries.get(id)
+      await db.media.put({ id, format: data.format, anime: data.anime, bookType: data.bookType, catalogRef: data.catalogRef, label: label.value })
+      await db.entries.put({
+        mediaId: id,
+        status: progress.status,
+        createdAt: data.createdAt,
+        updatedAt: Math.max(before?.updatedAt ?? 0, latestAt(data)),
+        reading: progress.reading,
+        playtimeMinutes: progress.playtimeMinutes,
+        liked: liked.value,
+        rating: rating.value as Rating | undefined,
+        watchlisted: watchlisted.value,
+        groupsAt: Object.fromEntries(groupNames.map((name) => [name, data.groups[name].at])),
+      })
+    }
+  }
+
+  /** Moves every local row of `from` to `to`, merging into `to` if it already exists. */
+  async function rewriteId(from: string, to: string) {
+    if (from === to) return
+    const local = await currentChange({ kind: 'entry', id: from })
+    const target = await currentChange({ kind: 'entry', id: to })
+    await db.completions.where({ mediaId: from }).modify({ mediaId: to })
+    const episodes = await db.episodes.where({ mediaId: from }).toArray()
+    await db.episodes.where({ mediaId: from }).delete()
+    for (const episode of episodes) {
+      const kept = await db.episodes.get([to, episode.season, episode.number])
+      if (!kept || kept.updatedAt < episode.updatedAt) await db.episodes.put({ ...episode, mediaId: to })
+    }
+    const link = await db.catalog.where({ mediaId: from }).first()
+    if (link) {
+      await db.catalog.delete(link.key)
+      if (!await db.catalog.where({ mediaId: to }).count()) await db.catalog.put({ ...link, mediaId: to })
+    }
+    const queued = [
+      ...await db.outbox.where({ kind: 'entry', id: from }).toArray(),
+      ...await db.outbox.where('[kind+id]').between(['episode', `${from}:`], ['episode', `${from}:\uffff`]).toArray(),
+    ]
+    await db.outbox.bulkDelete(queued.map(({ kind, id }): [string, string] => [kind, id]))
+    for (const row of queued) {
+      const id = row.kind === 'entry' ? to : `${to}${row.id.slice(from.length)}`
+      const kept = await db.outbox.get([row.kind, id])
+      await db.outbox.put({ ...row, id, at: Math.max(row.at, kept?.at ?? 0) })
+    }
+    await db.entries.delete(from)
+    await db.media.delete(from)
+    if (local) await writeChange(mergeChange(target, { ...local, id: to }))
+  }
+
+  /** Applies a sync response: remaps first, then merges each change, without queuing anything. */
+  async function applyRemote(changes: readonly SyncChange[], remap: Readonly<Record<string, string>>) {
+    await db.transaction('rw', tables, async () => {
+      for (const [from, to] of Object.entries(remap)) await rewriteId(from, to)
+      for (const change of changes) {
+        const catalogRef = change.kind === 'entry' ? change.data?.catalogRef : undefined
+        const twin = catalogRef ? await db.media.where({ catalogRef }).first() : undefined
+        if (twin) await rewriteId(twin.id, change.id)
+        const current = await currentChange(change)
+        const merged = mergeChange(current, change)
+        if (merged !== current) await writeChange(merged)
+      }
+    })
+  }
+
+  /** Queues every local record, for the first merge into an account. */
+  async function enqueueAll() {
+    return db.transaction('rw', tables, async () => {
+      const [entryIds, completionIds, episodeKeys] = await Promise.all([
+        db.entries.toCollection().primaryKeys(), db.completions.toCollection().primaryKeys(), db.episodes.toCollection().primaryKeys(),
+      ])
+      return enqueue([
+        ...entryIds.map((id) => ({ kind: 'entry' as const, id })),
+        ...completionIds.map((id) => ({ kind: 'completion' as const, id })),
+        ...episodeKeys.map(([mediaId, season, number]) => ({ kind: 'episode' as const, id: episodeId(mediaId, { season, number }) })),
+      ], clock())
+    })
+  }
+
+  async function saveMergeSnapshot() {
+    await db.transaction('rw', [...records, db.meta], async () => {
+      await db.meta.put({ key: 'mergeSnapshot', value: { backup: buildBackup(await readEntries()), expiresAt: clock() + mergeSnapshotAge } })
+    })
+  }
+
+  async function mergeSnapshot() {
+    const snapshot = await getMeta('mergeSnapshot')
+    return snapshot && snapshot.expiresAt > clock() ? snapshot.backup : undefined
+  }
+
+  /** Clears the library, outbox and account; cached catalog responses stay. */
+  async function clearAll() {
+    await db.transaction('rw', tables, () => Promise.all(tables.map((table) => table.clear())))
+  }
+
+  async function storeSnapshot(mediaId: string, media: Media) {
+    await db.transaction('rw', db.media, db.catalog, async () => {
+      const key = (await db.media.get(mediaId))?.catalogRef
+      const identity = key ? parseCatalogKey(key) : undefined
+      if (!key || !identity) return
+      const now = clock()
+      const expiresAt = Math.min(now, media.catalogedAt ?? now) + catalogCacheAge(identity.provider)
+      if (expiresAt > now) await db.catalog.put({ key, mediaId, media, expiresAt })
+    })
+  }
+
+  /** Titles with a permanent catalog ID but no current snapshot to display. */
+  async function missingSnapshots() {
+    return db.transaction('r', db.media, db.catalog, async () => {
+      const current = new Set((await db.catalog.where('expiresAt').above(clock()).toArray()).map(({ mediaId }) => mediaId))
+      return (await db.media.toArray()).flatMap(({ id, catalogRef }) => catalogRef && !current.has(id) ? [{ mediaId: id, catalogRef }] : [])
+    })
+  }
+
   return {
     read, watch, save, completeToday, uncomplete, savePreference, setEpisode, remove, exportBackup, previewRestore, applyRestore,
     purgeExpired, refreshSnapshot, readResponse, cacheResponse,
+    account, setAccount, lastSub, setCursor, pendingChanges, acknowledge, applyRemote, enqueueAll,
+    saveMergeSnapshot, mergeSnapshot, clearAll, storeSnapshot, missingSnapshots,
     close: () => db.close(),
     deleteDatabase: () => db.delete(),
   }

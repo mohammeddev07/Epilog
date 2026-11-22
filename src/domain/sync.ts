@@ -77,7 +77,7 @@ export function clampTime(at: number, now: number) {
   return Math.min(at, now + 60_000)
 }
 
-const groupNames = ['progress', 'liked', 'rating', 'watchlisted', 'label'] as const
+export const groupNames = ['progress', 'liked', 'rating', 'watchlisted', 'label'] as const
 const latest = (data: EntryData) => Math.max(...groupNames.map((name) => data.groups[name].at))
 
 function mergeEntry(current: EntryData, incoming: EntryData): EntryData {

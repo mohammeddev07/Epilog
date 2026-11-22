@@ -11,6 +11,9 @@ import type { LibraryStore } from './library'
 const film = demoCatalog.find(({ id }) => id === 'the-last-signal')!
 const game = demoCatalog.find(({ format }) => format === 'GAME')!
 const anime = demoCatalog.find(({ format, anime }) => format === 'SERIES' && anime)!
+const catalogGame: Media = { ...game, id: 'igdb:game:1942', identity: { provider: 'igdb', entity: 'game', id: '1942' } }
+const catalogFilm: Media = { ...film, id: 'tmdb:movie:1', identity: { provider: 'tmdb', entity: 'movie', id: '1' } }
+const account = { sub: 's1', email: 'a@example.test', name: 'A' }
 const databases: LibraryStore[] = []
 
 function open(name = crypto.randomUUID(), clock?: () => number) {
@@ -33,12 +36,16 @@ describe('IndexedDB library', () => {
     })
     await original.table('media').put({ id: game.id, format: 'GAME', anime: false })
     await original.table('entries').put({ mediaId: game.id, status: 'In progress', createdAt: 1, updatedAt: 2, playtimeMinutes: 150 })
+    await original.table('catalog').put({ key: 'igdb:game:7', mediaId: game.id, media: game, expiresAt: Date.now() + 60_000 })
     original.close()
 
-    const upgraded = open(name)
+    let now = Date.now()
+    const upgraded = open(name, () => now)
     expect((await upgraded.read()).get(game.id)).toMatchObject({ status: 'In progress', playtimeMinutes: 150 })
     await upgraded.cacheResponse('search/igdb:game', 'igdb', { items: [] })
     expect((await upgraded.readResponse('search/igdb:game'))?.payload).toEqual({ items: [] })
+    now += 2 * 60_000
+    expect(await upgraded.missingSnapshots()).toEqual([{ mediaId: game.id, catalogRef: 'igdb:game:7' }])
   })
 
   it('bounds its cache and ignores expired data', async () => {
@@ -246,5 +253,133 @@ describe('IndexedDB library', () => {
     await expect(store.applyRestore(preview, true)).rejects.toThrow('changed after the preview')
     expect(() => parseBackup(JSON.stringify(backup).replace('2026-11-18', '2026-11-31'))).toThrow('supported Epilog backup')
     expect((await store.read()).get(film.id)?.status).toBe('Dropped')
+  })
+
+  it('keeps catalog IDs after the snapshot expires', async () => {
+    let now = Date.now()
+    const store = open(undefined, () => now)
+    await store.savePreference(catalogGame, { kind: 'like', value: true })
+    now += 2 * 24 * 60 * 60_000
+    await store.purgeExpired()
+    expect(await store.missingSnapshots()).toEqual([{ mediaId: expect.any(String), catalogRef: 'igdb:game:1942' }])
+    const [[id, entry]] = await store.read()
+    expect(entry.media.identity).toEqual(catalogGame.identity)
+    expect((await store.savePreference(catalogGame, { kind: 'rating', value: 3 })).id).toBe(id)
+    await store.storeSnapshot(id, { ...catalogGame, catalogedAt: now })
+    expect(await store.missingSnapshots()).toEqual([])
+  })
+
+  it('queues changes only while signed in, folding repeat edits into one change', async () => {
+    const store = open()
+    await store.savePreference(film, { kind: 'like', value: true })
+    expect(await store.pendingChanges(500)).toEqual([])
+    await store.setAccount(account)
+    expect(await store.account()).toMatchObject({ ...account, cursor: 0 })
+    await store.savePreference(film, { kind: 'rating', value: 4 })
+    await store.savePreference(film, { kind: 'rating', value: 5 })
+    const changes = await store.pendingChanges(500)
+    expect(changes).toHaveLength(1)
+    expect(changes[0]).toMatchObject({ kind: 'entry', id: film.id, data: { groups: { liked: { value: true }, rating: { value: 5 } } } })
+    await store.setCursor(7, 123)
+    expect(await store.account()).toMatchObject({ cursor: 7, lastSyncAt: 123 })
+    await store.setAccount(undefined)
+    expect(await store.account()).toBeUndefined()
+    expect(await store.lastSub()).toBe('s1')
+    expect(await store.pendingChanges(500)).toEqual([])
+    expect((await store.read()).size).toBe(1)
+  })
+
+  it('queues tombstones for a removed title and a removed watch', async () => {
+    const store = open()
+    await store.setAccount(account)
+    await store.completeToday(film)
+    const [completion] = (await store.read()).get(film.id)!.completions
+    await store.uncomplete(film)
+    const changes = await store.pendingChanges(500)
+    expect(changes).toHaveLength(2)
+    expect(changes).toEqual(expect.arrayContaining([
+      { kind: 'completion', id: completion.id, data: null, at: expect.any(Number) },
+      { kind: 'entry', id: film.id, data: null, at: expect.any(Number) },
+    ]))
+  })
+
+  it('applyRemote rewrites a local id to the canonical id', async () => {
+    const store = open()
+    await store.setAccount(account)
+    const completion = { id: 'c1', date: '2026-11-18' }
+    const { id } = await store.save(catalogFilm, { status: 'Completed', completion })
+    await store.applyRemote([], { [id]: 'm-canon' })
+    const entries = await store.read()
+    expect(entries.has(id)).toBe(false)
+    expect(entries.get('m-canon')).toMatchObject({ status: 'Completed', completions: [completion], media: { title: catalogFilm.title } })
+    expect((await store.pendingChanges(500)).map(({ id }) => id).sort()).toEqual(['c1', 'm-canon'])
+    expect(await store.missingSnapshots()).toEqual([])
+  })
+
+  it('applyRemote merges incoming changes without queuing them', async () => {
+    const store = open(undefined, () => 1000)
+    await store.setAccount(account)
+    await store.savePreference(film, { kind: 'like', value: true })
+    await store.acknowledge(await store.pendingChanges(500))
+    const groups = { progress: { at: 0 }, liked: { value: false, at: 500 }, rating: { value: 4, at: 2000 }, watchlisted: { at: 0 }, label: { at: 0 } }
+    await store.applyRemote([
+      { kind: 'entry', id: film.id, data: { format: 'MOVIE', anime: false, createdAt: 10, groups }, at: 2000 },
+      { kind: 'completion', id: 'remote-watch', data: { mediaId: film.id, date: '2026-11-20' }, at: 2000 },
+    ], {})
+    expect((await store.read()).get(film.id)).toMatchObject({ liked: true, rating: 4, completions: [{ id: 'remote-watch' }] })
+    expect(await store.pendingChanges(500)).toEqual([])
+    await store.applyRemote([{ kind: 'entry', id: film.id, data: null, at: 3000 }], {})
+    expect((await store.read()).size).toBe(0)
+  })
+
+  it('acknowledge keeps a change edited after it was read', async () => {
+    const store = open()
+    await store.setAccount(account)
+    await store.savePreference(film, { kind: 'rating', value: 4 })
+    const sent = await store.pendingChanges(500)
+    await store.savePreference(film, { kind: 'rating', value: 5 })
+    await store.acknowledge(sent)
+    const pending = await store.pendingChanges(500)
+    expect(pending).toMatchObject([{ kind: 'entry', data: { groups: { rating: { value: 5 } } } }])
+    await store.acknowledge(pending)
+    expect(await store.pendingChanges(500)).toEqual([])
+  })
+
+  it('enqueueAll queues every entry, completion and episode', async () => {
+    const store = open()
+    await store.save(film, { status: 'Completed', completion: { id: 'c1', date: '2026-11-18' } })
+    await store.save(anime, { status: 'Planned' })
+    await store.setEpisode(anime.id, manualEpisode({ season: 1, number: 2 }), true)
+    await store.setAccount(account)
+    expect(await store.enqueueAll()).toBe(4)
+    const changes = await store.pendingChanges(500)
+    expect(changes.map(({ kind, id }) => `${kind} ${id}`).sort()).toEqual(
+      ['completion c1', `entry ${anime.id}`, `entry ${film.id}`, `episode ${anime.id}:1:2`])
+    expect(changes.find(({ kind }) => kind === 'episode')?.data).toEqual({ mediaId: anime.id, season: 1, number: 2, watched: true })
+  })
+
+  it('keeps a merge snapshot and clears everything but cached responses', async () => {
+    let now = Date.now()
+    const store = open(undefined, () => now)
+    await store.save(film, { status: 'Planned' })
+    await store.cacheResponse('search', 'tmdb', { items: [] })
+    await store.saveMergeSnapshot()
+    expect((await store.mergeSnapshot())?.entries).toHaveLength(1)
+    await store.setAccount(account)
+    await store.clearAll()
+    expect((await store.read()).size).toBe(0)
+    expect(await store.account()).toBeUndefined()
+    expect(await store.lastSub()).toBeUndefined()
+    expect(await store.readResponse('search')).toBeDefined()
+    await store.save(film, { status: 'Planned' })
+    await store.saveMergeSnapshot()
+    now += 31 * 24 * 60 * 60_000
+    expect(await store.mergeSnapshot()).toBeUndefined()
+  })
+
+  it('backups still exclude catalog IDs', async () => {
+    const store = open()
+    await store.savePreference(catalogGame, { kind: 'like', value: true })
+    expect(JSON.stringify(await store.exportBackup())).not.toContain('catalogRef')
   })
 })

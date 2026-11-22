@@ -13,6 +13,7 @@ export interface OwnedMedia {
   anime: boolean
   bookType?: BookType
   label?: string
+  catalogRef?: string
 }
 
 export interface EpisodeActivity extends EpisodePosition {
@@ -53,7 +54,8 @@ export interface RestorePreview {
 }
 
 export function buildBackup(entries: BackupEntry[]): Backup {
-  return { format: backupFormat, version: backupVersion, entries }
+  const withoutCatalog = entries.map(({ media: { id, format, anime, bookType, label }, ...entry }) => ({ ...entry, media: { id, format, anime, bookType, label } }))
+  return { format: backupFormat, version: backupVersion, entries: withoutCatalog }
 }
 
 export function backupFileName() {
