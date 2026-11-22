@@ -70,6 +70,7 @@ function entryData(row: EntryRow, media: OwnedMedia): EntryData {
 }
 
 const latestAt = (data: EntryData) => Math.max(...groupNames.map((name) => data.groups[name].at))
+const latestEpisodeAt = (episodes: readonly EpisodeRow[]) => episodes.reduce((at, row) => Math.max(at, row.updatedAt), 0)
 const episodeId = (mediaId: string, { season, number }: EpisodePosition) => `${mediaId}:${season}:${number}`
 
 /** Media ids may contain ':', so read the season and number from the right. */
@@ -201,11 +202,14 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
       const owned = byMedia.get(entry.mediaId)
       if (!owned) throw new Error('A library entry is missing its media record.')
       const { mediaId } = entry
+      const episodes = byEpisode.get(mediaId) ?? []
       return {
         ...trackingFields(entry),
+        // Backups also need to work for libraries that received episodes before the parent stamp was maintained.
+        updatedAt: Math.max(entry.updatedAt, latestEpisodeAt(episodes)),
         media: owned,
         completions: (byCompletion.get(mediaId) ?? []).map(({ id, date }) => ({ id, date })),
-        episodes: (byEpisode.get(mediaId) ?? []).map(({ season, number, watched, updatedAt }) => ({ season, number, watched, updatedAt })),
+        episodes: episodes.map(({ season, number, watched, updatedAt }) => ({ season, number, watched, updatedAt })),
       }
     })
   }
@@ -550,8 +554,19 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
       if (change.data) await db.completions.put({ id: change.id, ...change.data })
       else await db.completions.delete(change.id)
     } else if (change.kind === 'episode') {
-      if (change.data) await db.episodes.put({ ...change.data, updatedAt: change.at })
-      else await db.episodes.delete(episodeRowKey(change.id))
+      if (!change.data) {
+        await db.episodes.delete(episodeRowKey(change.id))
+        return
+      }
+      const { mediaId } = change.data
+      await db.episodes.put({ ...change.data, updatedAt: change.at })
+      const parent = await db.entries.get(mediaId)
+      if (parent && change.at > parent.updatedAt) {
+        const label = (await db.media.get(mediaId))?.label
+        // This is the last activity time, not a new edit to any synchronized field.
+        const groupsAt = stampGroups(parent, label, parent, label, parent.updatedAt)
+        await db.entries.update(mediaId, { updatedAt: change.at, groupsAt })
+      }
     } else if (!change.data) {
       await db.catalog.where({ mediaId: change.id }).delete()
       await db.entries.delete(change.id)
@@ -559,7 +574,10 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
     } else {
       const { id, data } = change
       const { progress, liked, rating, watchlisted, label } = data.groups
-      const [before, beforeMedia] = await Promise.all([db.entries.get(id), db.media.get(id)])
+      const [before, beforeMedia, episodes] = await Promise.all([
+        db.entries.get(id), db.media.get(id),
+        data.format === 'SERIES' ? db.episodes.where({ mediaId: id }).toArray() : [],
+      ])
       // Catalog entries never sync their label: keep this device's, or take a book's title from its snapshot.
       const snapshot = data.catalogRef && data.format === 'BOOK' ? await db.catalog.where({ mediaId: id }).first() : undefined
       const localLabel = beforeMedia?.label ?? fallbackLabel ?? snapshot?.media.title
@@ -569,7 +587,7 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
         mediaId: id,
         status: progress.status,
         createdAt: data.createdAt,
-        updatedAt: Math.max(before?.updatedAt ?? 0, latestAt(data)),
+        updatedAt: Math.max(before?.updatedAt ?? 0, latestAt(data), latestEpisodeAt(episodes)),
         reading: progress.reading,
         playtimeMinutes: progress.playtimeMinutes,
         liked: liked.value,

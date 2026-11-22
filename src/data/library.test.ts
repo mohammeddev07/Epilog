@@ -334,6 +334,24 @@ describe('IndexedDB library', () => {
     expect((await store.read()).size).toBe(0)
   })
 
+  it('advances a remote parent that arrives after its episode activity', async () => {
+    const store = open(undefined, () => 1500)
+    const groups = { progress: { status: 'In progress' as const, at: 1000 }, liked: { at: 0 },
+      rating: { at: 0 }, watchlisted: { at: 0 }, label: { at: 0 } }
+    await store.applyRemote([
+      { kind: 'episode', id: `${anime.id}:1:1`, at: 2000, data: { mediaId: anime.id, season: 1, number: 1, watched: false } },
+    ], {})
+    await store.applyRemote([
+      { kind: 'entry', id: anime.id, at: 1000, data: { format: 'SERIES', anime: true, groups, createdAt: 900 } },
+    ], {})
+    const backup = parseBackup(JSON.stringify(await store.exportBackup()))
+    expect(backup.entries[0]).toMatchObject({ updatedAt: 2000, episodes: [{ updatedAt: 2000, watched: false }] })
+    // A slower local clock still uses the parent timestamp already stored by sync.
+    await store.setEpisode(anime.id, manualEpisode({ season: 1, number: 2 }), true)
+    const after = parseBackup(JSON.stringify(await store.exportBackup()))
+    expect(after.entries[0].episodes).toContainEqual({ season: 1, number: 2, watched: true, updatedAt: 2000 })
+  })
+
   it('a later local entry keeps remote values it never set', async () => {
     const store = open(undefined, () => 2000)
     await store.setAccount(account)

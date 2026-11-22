@@ -201,6 +201,27 @@ describe('two devices against the real sync handler', () => {
     expect(JSON.parse(liveRecords('entry')[0].data as string)).toMatchObject({ groups: { rating: { value: 4 }, liked: { value: true } } })
   })
 
+  it('exports a valid backup after receiving episode activity that leaves series status unchanged', async () => {
+    const a = device()
+    const b = device()
+    const { id } = await a.store.save(show, { status: 'In progress' })
+    await a.signIn()
+    await b.signIn()
+
+    now += minute
+    const second = manualEpisode({ season: 1, number: 2 })
+    await a.store.setEpisode(id, second, true)
+    await settle(a, b)
+    const saved = (await b.store.read()).get(id)
+    expect(saved).toMatchObject({ updatedAt: now, status: 'In progress', watched: [second] })
+    const backup = parseBackup(JSON.stringify(await b.store.exportBackup()))
+    expect(backup.entries[0]).toMatchObject({ updatedAt: now, episodes: [{ number: 2, watched: true, updatedAt: now }] })
+    // Recording episode activity must not turn the unchanged status into a new sync edit.
+    await b.store.enqueueAll()
+    expect((await b.store.pendingChanges(10)).find(({ kind }) => kind === 'entry'))
+      .toMatchObject({ data: { groups: { progress: { at: start } } } })
+  })
+
   it('pages a first merge of more than 500 changes on push and pull', async () => {
     const a = device()
     const b = device()

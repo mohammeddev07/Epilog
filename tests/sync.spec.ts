@@ -80,7 +80,7 @@ function fakeServer() {
     await context.route('**/api/sync', (route) => {
       expect(route.request().headers()['content-type']).toBe('application/json')
       if (network.offline) return route.abort('internetdisconnected') // routes still answer under setOffline
-      if (network.expired) return route.fulfill({ status: 401, json: { error: 'unauthorized' } })
+      if (network.expired || route.request().headers()['x-epilog-account'] !== sub) return route.fulfill({ status: 401, json: { error: 'unauthorized' } })
       const { cursor, changes } = route.request().postDataJSON() as { cursor: number; changes: SyncChange[] }
       push(sub, changes)
       const account = user(sub)

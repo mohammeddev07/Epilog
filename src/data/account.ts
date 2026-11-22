@@ -86,7 +86,16 @@ export async function signIn(credential: string, choose: (question: 'merge-or-re
   const profile = profileSchema.parse(await response.json())
   const owner = (await library.account())?.sub ?? await library.lastSub()
   const kept = (await library.read()).size > 0
-  const replace = kept && owner && owner !== profile.sub && await choose('merge-or-replace') === 'replace'
+  let replace = false
+  if (kept && owner && owner !== profile.sub) {
+    try {
+      replace = await choose('merge-or-replace') === 'replace'
+    } catch (cause) {
+      // Undo the newly issued cookie. Sync also checks the local owner if the network prevents cleanup.
+      await logout()
+      throw cause
+    }
+  }
   // Either way the library from before sign-in stays exportable from Backup & Restore for 30 days.
   if (kept) await library.saveMergeSnapshot()
   if (replace) await library.clearAll(true)
@@ -97,6 +106,13 @@ export async function signIn(credential: string, choose: (question: 'merge-or-re
 
 // The Worker's CSRF guard wants JSON on every mutating request, bodies or not.
 const json = { 'Content-Type': 'application/json' }
+
+function logout() {
+  return fetch('/api/auth/logout', { method: 'POST', headers: json, signal: AbortSignal.timeout(15_000) }).then(
+    (response) => response.ok || response.status === 401,
+    () => false,
+  )
+}
 
 /** Thrown by `signOut(false)` when queued changes couldn't be pushed: nothing was removed and the device is still signed in. */
 export class UnsyncedChangesError extends Error {
@@ -120,10 +136,7 @@ export async function signOut(keep: boolean): Promise<boolean> {
     const state = sync.state()
     throw new UnsyncedChangesError(state.status === 'signed-out' ? 'expired' : state.parkedCount ? 'rejected' : 'unavailable')
   }
-  const reached = await fetch('/api/auth/logout', { method: 'POST', headers: json, signal: AbortSignal.timeout(15_000) }).then(
-    (response) => response.ok || response.status === 401,
-    () => false,
-  )
+  const reached = await logout()
   if (keep) await library.setAccount(undefined)
   else await library.clearAll()
   await sync.syncNow()

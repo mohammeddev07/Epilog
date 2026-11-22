@@ -31,6 +31,8 @@ export type SyncChange =
   | { kind: 'completion'; id: string; data: CompletionData | null; at: number }
   | { kind: 'episode'; id: string; data: EpisodeData | null; at: number }
 
+export const syncAccountHeader = 'X-Epilog-Account'
+
 export const maxChanges = 500
 export const maxSyncBytes = 1_000_000
 export const tombstoneAge = 180 * 24 * 60 * 60_000

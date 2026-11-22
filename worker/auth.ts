@@ -1,4 +1,4 @@
-import { maxSyncBytes } from '../src/domain/sync'
+import { maxSyncBytes, syncAccountHeader } from '../src/domain/sync'
 import type { D1Database } from './d1'
 import { deploymentConfig } from './deployment-config'
 import { CatalogFailure, errorResponse, isJson, readJson, record, rejectCrossSite, responseHeaders } from './http'
@@ -71,13 +71,14 @@ function sessionToken(request: Request) {
 }
 
 // `cookie`, when present, is the renewed Set-Cookie value the caller should send back.
-export async function sessionUser(request: Request, db: D1Database, now: number): Promise<{ id: string; cookie?: string } | undefined> {
+export async function sessionUser(request: Request, db: D1Database, now: number, expectedSub?: string): Promise<{ id: string; cookie?: string } | undefined> {
   const token = sessionToken(request)
   if (!token) return undefined
   const hash = await sha256(token)
-  const session = await db.prepare('SELECT user_id, expires_at FROM sessions WHERE token_hash = ? AND expires_at > ?')
-    .bind(hash, now).first<{ user_id: string; expires_at: number }>()
-  if (!session) return undefined
+  const session = await db.prepare(`SELECT sessions.user_id, sessions.expires_at, users.google_sub
+    FROM sessions JOIN users ON users.id = sessions.user_id WHERE token_hash = ? AND expires_at > ?`)
+    .bind(hash, now).first<{ user_id: string; expires_at: number; google_sub: string }>()
+  if (!session || (expectedSub !== undefined && session.google_sub !== expectedSub)) return undefined
   if (session.expires_at - now >= slideBelow) return { id: session.user_id }
   await db.prepare('UPDATE sessions SET expires_at = ? WHERE token_hash = ?').bind(now + sessionAge, hash).run()
   return { id: session.user_id, cookie: sessionCookie(token, sessionAge) }
@@ -143,7 +144,10 @@ export function createAccountRoutes(options: { keys?: () => Promise<JsonWebKey[]
           return reply(null, clearCookie)
         }
 
-        const user = await sessionUser(request, db, now())
+        // Sync needs both the cookie's authenticated identity and the owner of the local queue.
+        const expectedSub = route === 'POST /api/sync' ? request.headers.get(syncAccountHeader) : undefined
+        if (expectedSub === null || expectedSub === '') throw new CatalogFailure(401)
+        const user = await sessionUser(request, db, now(), expectedSub)
         if (!user) throw new CatalogFailure(401)
         renewed = user.cookie
         if (route === 'POST /api/sync') {

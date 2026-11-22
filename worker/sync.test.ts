@@ -231,8 +231,9 @@ describe('POST /api/sync', () => {
   const limit = vi.fn(async () => ({ success: true }))
   const env: Env = { DB: undefined, GOOGLE_CLIENT_ID: 'client', SYNC_RATE_LIMITER: { limit } }
   const worker = createCatalogWorker(vi.fn<typeof fetch>(), createAccountRoutes({ keys: async () => [], now: () => start }))
-  const post = (body: string) => worker.fetch(new Request(`${origin}/api/sync`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin, Cookie: cookie }, body,
+  const post = (body: string, expectedSub = 'sub-ada') => worker.fetch(new Request(`${origin}/api/sync`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin, Cookie: cookie,
+      ...expectedSub ? { 'X-Epilog-Account': expectedSub } : {} }, body,
   }), { ...env, DB: db })
 
   beforeEach(async () => {
@@ -253,6 +254,18 @@ describe('POST /api/sync', () => {
     expect(huge.status).toBe(413)
     expect(await huge.json()).toEqual({ error: 'too_large' })
     expect(db.dump('records')).toEqual([])
+  })
+
+  it('rejects a queued push belonging to another account or missing its owner', async () => {
+    const body = JSON.stringify({ cursor: 0, changes: [entry('m1', 100)] })
+    for (const owner of ['sub-grace', '']) {
+      const response = await post(body, owner)
+      expect(response.status).toBe(401)
+      expect(response.headers.has('set-cookie')).toBe(false)
+      expect(db.dump('records')).toEqual([])
+      expect(revision('ada')).toBe(0)
+      expect(revision('grace')).toBe(0)
+    }
   })
 
   it('syncs for the session user, limited per user, and requires a session', async () => {

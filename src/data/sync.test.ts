@@ -102,7 +102,9 @@ describe('sync loop', () => {
 
     expect(requests).toHaveLength(1)
     expect(requests[0].url).toBe('/api/sync')
-    expect(requests[0].init).toMatchObject({ method: 'POST', headers: { 'Content-Type': 'application/json' } })
+    expect(requests[0].init).toMatchObject({
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Epilog-Account': account.sub },
+    })
     expect(requests[0].body).toEqual({ cursor: 0, changes: local })
     const entries = await store.read()
     expect(entries.get('remote-anime')).toMatchObject({ status: 'Planned' })

@@ -1,10 +1,14 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { deleteAccount, googleClientId, signOut, UnsyncedChangesError } from './account'
+import { deleteAccount, googleClientId, signIn, signOut, UnsyncedChangesError } from './account'
+import { demoCatalog } from './demo'
 import { library } from './library'
 import { sync } from './sync'
 
 vi.mock('./library', () => ({
-  library: { hasUnsyncedChanges: vi.fn(), setAccount: vi.fn(), clearAll: vi.fn() },
+  library: {
+    hasUnsyncedChanges: vi.fn(), setAccount: vi.fn(), clearAll: vi.fn(),
+    account: vi.fn(), read: vi.fn(), saveMergeSnapshot: vi.fn(), enqueueAll: vi.fn(),
+  },
 }))
 vi.mock('./sync', () => ({ sync: { syncNow: vi.fn(), state: vi.fn() } }))
 
@@ -24,6 +28,30 @@ it('retries a failed config request and shares a successful response between cal
   expect(await googleClientId()).toBe('configured')
   expect(await googleClientId()).toBe('configured')
   expect(fetch).toHaveBeenCalledTimes(2)
+})
+
+it.each([true, false])('cancels switching accounts without changing the local library (logout reachable: %s)', async (reachable) => {
+  const profile = { sub: 'account-b', email: 'b@example.test', name: 'B' }
+  const fetch = vi.fn().mockResolvedValueOnce(Response.json(profile))
+  if (reachable) fetch.mockResolvedValueOnce(new Response(null, { status: 204 }))
+  else fetch.mockRejectedValueOnce(new TypeError('offline'))
+  vi.stubGlobal('fetch', fetch)
+  vi.mocked(library.account).mockResolvedValue({ sub: 'account-a', email: 'a@example.test', name: 'A', cursor: 7 })
+  const [media] = demoCatalog
+  vi.mocked(library.read).mockResolvedValue(new Map([[media.id, {
+    media, completions: [], watched: [], unwatched: [], updatedAt: 1,
+  }]]))
+
+  const cancelled = new Error('Cancelled')
+  const choose = vi.fn().mockRejectedValue(cancelled)
+  await expect(signIn('credential-b', choose)).rejects.toBe(cancelled)
+  expect(choose).toHaveBeenCalledExactlyOnceWith('merge-or-replace')
+  expect(fetch).toHaveBeenLastCalledWith('/api/auth/logout', expect.objectContaining({ method: 'POST' }))
+  expect(library.saveMergeSnapshot).not.toHaveBeenCalled()
+  expect(library.setAccount).not.toHaveBeenCalled()
+  expect(library.clearAll).not.toHaveBeenCalled()
+  expect(library.enqueueAll).not.toHaveBeenCalled()
+  expect(sync.syncNow).not.toHaveBeenCalled()
 })
 
 it('keeps an expired session’s unsynced library and asks the user to sign in again', async () => {

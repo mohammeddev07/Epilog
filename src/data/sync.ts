@@ -1,5 +1,5 @@
 import type { SyncChange } from '../domain/sync'
-import { maxChanges, syncChangeSchema } from '../domain/sync'
+import { maxChanges, syncAccountHeader, syncChangeSchema } from '../domain/sync'
 import { library, libraryChanged } from './library'
 import type { LibraryStore } from './library'
 import { demoMode } from './useCatalog'
@@ -64,10 +64,10 @@ export function createSync(store: LibraryStore, options: { fetch?: typeof fetch;
         const response = await send('/api/sync', {
           method: 'POST',
           signal: AbortSignal.timeout(15_000),
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', [syncAccountHeader]: account.sub },
           body: JSON.stringify({ cursor: account.cursor, changes: sent }),
         })
-        // The session expired: keep the library and its queue for the next sign-in.
+        // A missing or mismatched session leaves the library and its queue for the next sign-in.
         if ((await store.account())?.sub !== account.sub) break
         if (response.status === 401) return set({ status: 'signed-out', ...parked() })
         if ((response.status === 400 || response.status === 413) && sent.length) {
