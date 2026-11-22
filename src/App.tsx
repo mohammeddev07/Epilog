@@ -32,10 +32,13 @@ import { iconSize } from './ui/tokens'
 const InstallStatus = lazy(() => import('./ui/InstallStatus'))
 
 // Owl mark (docs/brand/symbol-logos.html #03). Eyes, beak and smile are cut-outs, so it works on any background.
-const owlPath = 'M13 21L16.6 8.6Q17.3 6.6 18.9 8L27 15.5Q32 14 37 15.5L45.1 8Q46.7 6.6 47.4 8.6L51 21V39Q51 57 32 57Q13 57 13 39ZM15.2 28a8.3 8.3 0 1 0 16.6 0a8.3 8.3 0 1 0-16.6 0ZM32.2 28a8.3 8.3 0 1 0 16.6 0a8.3 8.3 0 1 0-16.6 0ZM20.6 26.5a3.9 3.9 0 1 0 7.8 0a3.9 3.9 0 1 0-7.8 0ZM37.6 26.5a3.9 3.9 0 1 0 7.8 0a3.9 3.9 0 1 0-7.8 0ZM29.2 35.4Q32 34.2 34.8 35.4L32.7 40.3Q32 41.4 31.3 40.3ZM19.4 43.6Q20.6 43 21.2 43.9Q25 49.4 32 49.7Q39 49.4 42.8 43.9Q43.4 43 44.6 43.6Q45.2 44.4 44.6 45.2Q40 51.9 32 52.2Q24 51.9 19.4 45.2Q18.8 44.4 19.4 43.6Z'
+const owlPath = 'M13 21L16.6 8.6Q17.3 6.6 18.9 8L27 15.5Q32 14 37 15.5L45.1 8Q46.7 6.6 47.4 8.6L51 21V39Q51 57 32 57Q13 57 13 39ZM15.2 28a8.3 8.3 0 1 0 16.6 0a8.3 8.3 0 1 0-16.6 0ZM32.2 28a8.3 8.3 0 1 0 16.6 0a8.3 8.3 0 1 0-16.6 0ZM29.2 35.4Q32 34.2 34.8 35.4L32.7 40.3Q32 41.4 31.3 40.3ZM19.4 43.6Q20.6 43 21.2 43.9Q25 49.4 32 49.7Q39 49.4 42.8 43.9Q43.4 43 44.6 43.6Q45.2 44.4 44.6 45.2Q40 51.9 32 52.2Q24 51.9 19.4 45.2Q18.8 44.4 19.4 43.6Z'
+// Pupils are drawn separately so the owl can blink.
+const owlPupils = 'M20.6 26.5a3.9 3.9 0 1 0 7.8 0a3.9 3.9 0 1 0-7.8 0ZM37.6 26.5a3.9 3.9 0 1 0 7.8 0a3.9 3.9 0 1 0-7.8 0Z'
 const LogoMark = ({ size }: { size: number }) => (
   <svg width={size} height={size} viewBox="7 4 50 55" aria-hidden="true">
     <path d={owlPath} fill="currentColor" fillRule="evenodd" />
+    <path className="logo-pupils" d={owlPupils} fill="currentColor" />
   </svg>
 )
 
@@ -203,6 +206,13 @@ function Application() {
     announce(`${media.title} marked ${media.format === 'BOOK' ? 'read' : media.format === 'GAME' ? 'played' : 'watched'}.`)
   }
 
+  async function uncomplete(media: Media) {
+    const { id, removed, completed } = await library.uncomplete(media)
+    if (!removed) setHighlightId(id)
+    announce(completed ? `Latest completion removed from ${media.title}.`
+      : `${media.title} marked ${media.format === 'BOOK' ? 'unread' : media.format === 'GAME' ? 'unplayed' : 'unwatched'}.`)
+  }
+
   async function setEpisode(entry: LibraryEntry, episodes: readonly Episode[], watched: boolean, season?: number) {
     await library.setEpisode(entry.media.id, episodes, watched)
     const name = season === undefined ? episodes[0].title : season === 0 ? 'Specials' : `Season ${season}`
@@ -267,7 +277,7 @@ function Application() {
               <div className="page" key={browse} hidden={Boolean(detailId)}>
                 {path === '/' ? <Dashboard entries={entries} onLog={openLog} />
                   : path === '/library' ? <Library entries={entries} view={browseParams.get('view')} defaultStatus={defaultStatus} defaultCategory={defaultCategory} highlightId={highlightId} />
-                  : path === '/popular' ? <Popular entries={entries} query={query ?? ''} onLog={openLog} onComplete={completeToday} onPreference={savePreference} />
+                  : path === '/popular' ? <Popular entries={entries} query={query ?? ''} onLog={openLog} onComplete={completeToday} onUncomplete={uncomplete} onPreference={savePreference} />
                   : path === '/search' ? <Search entries={entries} onLog={(media, trigger, status) => openLog(media, trigger, status ?? (browseParams.get('action') === 'watch' ? 'Completed' : undefined))} />
                   : path === '/compare' ? <Compare hash={hash} entries={entries} onLog={openLog} />
                   : path === '/settings' ? <Settings theme={theme} onTheme={changeTheme} storageError={storageError} onRestore={(count) => announce(count ? 'Backup restored.' : 'Backup reviewed. Your library is already up to date.')} />

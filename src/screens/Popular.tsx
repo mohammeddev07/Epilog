@@ -23,6 +23,7 @@ interface Props {
   query: string
   onLog: OpenLog
   onComplete: (media: Media) => Promise<void>
+  onUncomplete: (media: Media) => Promise<void>
   onPreference: SavePreference
 }
 
@@ -42,7 +43,7 @@ export function Popular({ query, ...actions }: Props) {
   )
 }
 
-function PopularCarousel({ browse, category, title, entries, onLog, onComplete, onPreference }: ReturnType<typeof readPopularLocation> & Omit<Props, 'query'>) {
+function PopularCarousel({ browse, category, title, entries, onLog, onComplete, onUncomplete, onPreference }: ReturnType<typeof readPopularLocation> & Omit<Props, 'query'>) {
   // direction: which way the last step went, so the title can slide in from that side.
   const [selection, setSelection] = useState({ key: title ?? undefined, waiting: false, direction: 0 })
   const prefetchedFrom = useRef<string | undefined>(undefined)
@@ -96,7 +97,7 @@ function PopularCarousel({ browse, category, title, entries, onLog, onComplete, 
           <span className="sr-only" aria-live="polite" aria-atomic="true">{media.title}, title {index + 1}</span>
           <SwipePosters detailId={entry?.media.id ?? media.id} items={items} index={index} onStep={step} />
           <PopularActions
-            key={key} media={media} entry={entry} onLog={onLog} onComplete={onComplete} onPreference={onPreference}
+            key={key} media={media} entry={entry} onLog={onLog} onComplete={onComplete} onUncomplete={onUncomplete} onPreference={onPreference}
             onInteract={() => setSelection({ key, waiting: false, direction: 0 })}
           />
           {loadingMore && !next ? <p className="popular-feed-status" role="status">Loading more titles…</p> : null}

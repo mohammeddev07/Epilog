@@ -6,7 +6,7 @@ import { buildBackup, planRestore } from '../domain/backup'
 import type { Backup, BackupEntry, EpisodeActivity, OwnedMedia, RestorePreview } from '../domain/backup'
 import type { CatalogPayload, Provider } from '../domain/catalog'
 import { catalogCacheAge, catalogKey, parseCatalogKey } from '../domain/identity'
-import { episodeKey, localDate, manualEpisode, updateEntry, updateEpisode, updatePreference } from '../domain/media'
+import { episodeKey, isEmptyEntry, localDate, manualEpisode, removeCompletion, updateEntry, updateEpisode, updatePreference } from '../domain/media'
 import type { Completion, Episode, LibraryEntry, LogDraft, Media, PreferenceChange, TitlePreferences } from '../domain/media'
 import { demoById } from './demo'
 
@@ -191,6 +191,9 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
         watchlisted: entry.watchlisted,
       })
 
+      const kept = new Set(entry.completions.map((completion) => completion.id))
+      const dropped = stored?.completions.filter((completion) => !kept.has(completion.id)).map((completion) => completion.id) ?? []
+      if (dropped.length) await db.completions.bulkDelete(dropped)
       for (const completion of entry.completions) {
         if (!stored?.completions.some((item) => item.id === completion.id)) {
           await db.completions.add({ ...completion, mediaId: id })
@@ -219,6 +222,23 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
     return writeEntry(media, (current, now) => current?.status === 'Completed' ? current : updateEntry(current?.media ?? media, current, {
       status: 'Completed', completion, playtimeMinutes: current?.playtimeMinutes,
     }, now))
+  }
+
+  /** "Remove watch": drops the latest completion, and the whole entry if nothing else was tracked. */
+  function uncomplete(media: Media) {
+    return db.transaction('rw', [...records, db.catalog], async () => {
+      let emptied = false
+      let completed = false
+      const result = await writeEntry(media, (current, now) => {
+        if (!current) throw new Error('This title is no longer in the library.')
+        const entry = removeCompletion(current, now)
+        emptied = entry !== current && isEmptyEntry(entry)
+        completed = entry.status === 'Completed'
+        return entry
+      })
+      if (emptied) await remove(result.id)
+      return { ...result, removed: emptied, completed }
+    })
   }
 
   function savePreference(media: Media, change: PreferenceChange) {
@@ -329,7 +349,7 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
   }
 
   return {
-    read, watch, save, completeToday, savePreference, setEpisode, remove, exportBackup, previewRestore, applyRestore,
+    read, watch, save, completeToday, uncomplete, savePreference, setEpisode, remove, exportBackup, previewRestore, applyRestore,
     purgeExpired, refreshSnapshot, readResponse, cacheResponse,
     close: () => db.close(),
     deleteDatabase: () => db.delete(),

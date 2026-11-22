@@ -29,8 +29,13 @@ test('starts on the selected poster and persists the four quick actions', async 
   const watched = page.getByRole('button', { name: 'Watched', exact: true })
   await expect(watched).toBeFocused()
   await expect(editor).toBeHidden()
-  await watched.click()
-  await expect(editor).toBeHidden()
+  await watched.click() // asks before removing; Keep leaves it watched
+  const unwatch = page.getByRole('dialog', { name: 'Mark as not watched?' })
+  const keep = unwatch.getByRole('button', { name: 'Keep' })
+  await expect(keep).toBeFocused()
+  await keep.click()
+  await expect(unwatch).toBeHidden()
+  await expect(watched).toBeFocused()
   await expect(watchlist).toHaveAttribute('aria-pressed', 'true')
   await page.getByRole('link', { name: 'The Last Signal', exact: true }).click()
   await expect(page.locator('.history-list time')).toHaveCount(1)
@@ -72,6 +77,15 @@ test('holding Watch opens the editor and saves only the date chosen there', asyn
     await page.getByRole('link', { name: 'The Last Signal', exact: true }).click()
     await expect(page.locator('.history-list time')).toHaveCount(1)
     await expect(page.locator('.history-list time')).toHaveAttribute('datetime', '2026-11-15')
+
+    await page.getByRole('button', { name: 'Back', exact: true }).click()
+    await watched.click()
+    const unwatch = page.getByRole('dialog', { name: 'Mark as not watched?' })
+    await expect(unwatch).toContainText('Nov 15, 2026')
+    await unwatch.getByRole('button', { name: 'Remove' }).click()
+    await expect(page.getByRole('button', { name: 'Watch', exact: true })).toBeFocused()
+    await page.reload()
+    await expect(page.getByRole('button', { name: 'Watch', exact: true })).toBeVisible()
   } finally {
     await context.close()
   }

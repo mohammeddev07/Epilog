@@ -79,6 +79,26 @@ describe('IndexedDB library', () => {
     expect(entry).toMatchObject({ status: 'Completed', playtimeMinutes: 90, completions: [{ date: '2026-11-19' }] })
   })
 
+  it('removes the latest watch, keeping earlier ones, progress and preferences', async () => {
+    const store = open()
+    await store.completeToday(film)
+    expect(await store.uncomplete(film)).toMatchObject({ removed: true }) // a lone watch leaves nothing behind
+    expect((await store.read()).size).toBe(0)
+
+    await store.save(film, { status: 'Completed', completion: { id: 'first', date: '2024-01-02' } })
+    await store.save(film, { status: 'Completed', completion: { id: 'rewatch', date: '2026-03-04' } })
+    await store.savePreference(film, { kind: 'like', value: true })
+    await store.uncomplete(film)
+    expect((await store.read()).get(film.id)).toMatchObject({ status: 'Completed', liked: true, completions: [{ id: 'first' }] })
+    await store.uncomplete(film)
+    expect((await store.read()).get(film.id)).toMatchObject({ status: undefined, liked: true, completions: [] })
+
+    await store.save(game, { status: 'In progress', playtimeMinutes: 90 })
+    await store.completeToday(game)
+    await store.uncomplete(game)
+    expect((await store.read()).get(game.id)).toMatchObject({ status: 'In progress', playtimeMinutes: 90, completions: [] })
+  })
+
   it('rolls back a new entry when its completion ID conflicts with another title', async () => {
     const store = open()
     const completion = { id: 'shared-event', date: '2026-11-18' }
