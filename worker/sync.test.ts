@@ -58,6 +58,11 @@ describe('handleSync', () => {
     expect((await sync('ada', 0)).changes).toEqual([entry('m1', 100), completion('c1', 'm1', 100)])
     expect(revision('ada')).toBe(2)
     expect(revision('grace')).toBe(2)
+    // Ada's alias stays Ada's.
+    expect((await sync('ada', 2, [entry('dup', 300, { catalogRef: 'tmdb:movie:2' })])).remap).toEqual({})
+    expect((await sync('ada', 3, [entry('dup2', 300, { catalogRef: 'tmdb:movie:2' })])).remap).toEqual({ dup2: 'dup' })
+    expect((await sync('grace', 0)).remap).toEqual({})
+    expect(db.dump('aliases')).toEqual([expect.objectContaining({ user_id: 'ada', from_id: 'dup2', to_id: 'dup' })])
   })
 
   it('is idempotent when the same push is retried', async () => {
@@ -91,7 +96,7 @@ describe('handleSync', () => {
     const racing: typeof db = {
       ...db,
       async batch(statements) {
-        if (statements.length === 5 && !raced) {
+        if (statements.length >= 6 && !raced) {
           raced = true
           await sync('ada', 1, [entry('m1', 100, {}, { rating: { value: 2, at: 300 } })])
         }
@@ -103,6 +108,58 @@ describe('handleSync', () => {
     const [m1] = (await sync('ada', 0)).changes
     expect(m1.data).toMatchObject({ groups: { liked: { value: true, at: 200 }, rating: { value: 2, at: 300 } } })
     expect(revision('ada')).toBe(3)
+  })
+
+  it('moves an id that already has a live server row into the canonical entry, children included', async () => {
+    // Device A logged a1 before its catalog ID was known; device B logged the same title as b1.
+    await sync('ada', 0, [entry('a1', 100, { catalogRef: undefined }, { rating: { value: 3, at: 250 } }), completion('c1', 'a1', 100), episode('a1', 100)])
+    await sync('ada', 3, [entry('b1', 200)])
+    // A's background lookup fills in the catalog ID and pushes a1 again (here without the stored rating, which still merges in).
+    const pushed = await sync('ada', 4, [entry('a1', 100)])
+    expect(pushed.remap).toEqual({ a1: 'b1' })
+
+    const pulled = await sync('ada', 0)
+    const live = pulled.changes.filter((change) => change.data)
+    expect(live.filter((change) => change.kind === 'entry').map((change) => change.id)).toEqual(['b1'])
+    expect(live.find((change) => change.kind === 'entry')?.data).toMatchObject({ catalogRef: 'tmdb:movie:1', createdAt: 100, groups: { rating: { value: 3, at: 250 } } })
+    expect(live.filter((change) => change.kind !== 'entry')).toEqual(expect.arrayContaining([completion('c1', 'b1', 100), episode('b1', 100)]))
+    expect(live).toHaveLength(3)
+    expect(db.dump('records').filter((row) => row.kind === 'entry' && row.deleted === 0)).toHaveLength(1)
+    expect(db.dump('records').find((row) => row.record_id === 'a1')).toMatchObject({ deleted: 1, catalog_ref: null })
+
+    // A later push that still uses the old id lands under the canonical one.
+    await sync('ada', pulled.cursor, [completion('c3', 'a1', 300), episode('a1', 300)])
+    const late = (await sync('ada', pulled.cursor)).changes
+    expect(late).toEqual([completion('c3', 'b1', 300), { ...episode('b1', 300) }])
+    expect(db.dump('records').filter((row) => row.kind === 'entry' && row.deleted === 0)).toHaveLength(1)
+  })
+
+  it('tells a device pulling from an older cursor about the alias and the old entry\'s tombstone', async () => {
+    await sync('ada', 0, [entry('a1', 100, { catalogRef: undefined })])
+    await sync('ada', 1, [entry('b1', 200)])
+    await sync('ada', 2, [entry('a1', 100)])
+    const other = await sync('ada', 2)
+    expect(other.remap).toEqual({ a1: 'b1' })
+    expect(other.changes).toEqual(expect.arrayContaining([{ kind: 'entry', id: 'a1', data: null, at: start }]))
+    // A device that has seen it all gets no remap.
+    expect((await sync('ada', other.cursor)).remap).toEqual({})
+  })
+
+  it('does not remap a new entry onto a deleted one with the same catalogRef', async () => {
+    await sync('ada', 0, [entry('a1', 100)])
+    await sync('ada', 1, [{ kind: 'entry', id: 'a1', data: null, at: 200 }])
+    expect(db.dump('records')[0]).toMatchObject({ deleted: 1, catalog_ref: null })
+    const readded = await sync('ada', 2, [entry('b1', 300)])
+    expect(readded.remap).toEqual({})
+    expect((await sync('ada', 0)).changes.filter((change) => change.data).map((change) => change.id)).toEqual(['b1'])
+  })
+
+  it('merges two new entries with the same catalogRef in one request into one', async () => {
+    const pushed = await sync('ada', 0, [entry('n1', 100), entry('n2', 200), completion('c1', 'n1', 100), completion('c2', 'n2', 200)])
+    expect(pushed.remap).toEqual({ n2: 'n1' })
+    const pulled = await sync('ada', 0)
+    expect(pulled.changes).toEqual([{ ...entry('n1', 200), data: { ...entry('n1', 200).data, createdAt: 100 } }, completion('c1', 'n1', 100), completion('c2', 'n1', 200)])
+    expect(pulled.remap).toEqual({ n2: 'n1' })
   })
 
   it('clamps a far-future timestamp so a later honest edit still wins', async () => {

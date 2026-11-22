@@ -32,7 +32,7 @@ export function createTestD1() {
     return prepared
   }
 
-  const db: D1Database & { dump(table: 'users' | 'sessions' | 'records'): Record<string, unknown>[] } = {
+  const db: D1Database & { dump(table: 'users' | 'sessions' | 'records' | 'aliases'): Record<string, unknown>[] } = {
     prepare: (query) => statement(query),
     async batch<T>(statements: D1PreparedStatement[]) {
       sqlite.exec('BEGIN')

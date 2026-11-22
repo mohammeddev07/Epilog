@@ -156,6 +156,7 @@ export function createAccountRoutes(options: { keys?: () => Promise<JsonWebKey[]
         }
         await db.batch([
           db.prepare('DELETE FROM records WHERE user_id = ?').bind(user.id),
+          db.prepare('DELETE FROM aliases WHERE user_id = ?').bind(user.id),
           db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(user.id),
           db.prepare('DELETE FROM users WHERE id = ?').bind(user.id),
         ])

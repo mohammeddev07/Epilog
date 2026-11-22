@@ -137,12 +137,13 @@ describe('account Worker', () => {
     const [adaId, graceId] = db.dump('users').map((user) => String(user.id))
     for (const id of [adaId, graceId]) {
       await db.prepare('INSERT INTO records (user_id, kind, record_id, data, deleted, updated_at, revision) VALUES (?, ?, ?, ?, 0, 1, 1)').bind(id, 'entry', 'media-1', '{}').run()
+      await db.prepare('INSERT INTO aliases (user_id, from_id, to_id, revision) VALUES (?, ?, ?, 1)').bind(id, 'media-0', 'media-1').run()
     }
     expect((await call('/api/account', mutate('DELETE'))).status).toBe(401)
     const response = await call('/api/account', mutate('DELETE', ada))
     expect(response.status).toBe(204)
     expect(response.headers.get('set-cookie')).toContain('Max-Age=0')
-    for (const table of ['users', 'sessions', 'records'] as const) {
+    for (const table of ['users', 'sessions', 'records', 'aliases'] as const) {
       expect(JSON.stringify(db.dump(table))).not.toContain(adaId)
       expect(db.dump(table)).toHaveLength(1)
     }
