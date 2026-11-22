@@ -2,10 +2,8 @@ import { useState } from 'react'
 import { readDefaultSort, sorts, sortPreferenceKey } from '../ui/library-preferences'
 import type { SortKey } from '../ui/library-preferences'
 import { BackupPanel } from '../ui/BackupPanel'
-import { useGoogleClientId } from '../data/account'
-import { useSync } from '../data/useSync'
-import { SignIn } from '../ui/GoogleButton'
-
+import { Link } from 'react-router'
+import { AccountPanel } from '../ui/AccountPanel'
 import { SelectionIndicator } from '../ui/SelectionIndicator'
 
 export const themes = ['system', 'light', 'dark'] as const
@@ -20,8 +18,6 @@ export function Settings({ theme, onTheme, storageError, onRestore }: {
 }) {
   const [sort, setSort] = useState(readDefaultSort)
   const [sortError, setSortError] = useState(false)
-  const syncState = useSync()
-  const signInOffered = Boolean(useGoogleClientId()) && (syncState.status === 'guest' || syncState.status === 'signed-out')
   function changeSort(value: SortKey) {
     try {
       localStorage.setItem(sortPreferenceKey, value)
@@ -32,14 +28,7 @@ export function Settings({ theme, onTheme, storageError, onRestore }: {
   return (
     <div className="settings">
       <header className="page-intro"><div><h1 tabIndex={-1}>Settings</h1></div></header>
-      {/* Interim guest sign-in; Task 8's AccountPanel replaces this section. */}
-      {signInOffered ? (
-        <section aria-labelledby="account-heading" className="settings-group">
-          <h2 id="account-heading">Account</h2>
-          <p className="muted">Sign in to keep your library in sync across your devices.</p>
-          <SignIn />
-        </section>
-      ) : null}
+      <AccountPanel />
       <section aria-labelledby="appearance-heading" className="settings-group settings-row">
         <div>
           <h2 id="appearance-heading">Appearance</h2>
@@ -70,7 +59,7 @@ export function Settings({ theme, onTheme, storageError, onRestore }: {
       <section aria-labelledby="app-info" className="settings-group settings-credits">
         <h2 id="app-info">App Information</h2>
         <h3>Privacy</h3>
-        <p className="muted">Your library stays in this browser. Catalog lookups send search text or catalog IDs to the relevant providers. Artwork loads from their servers.</p>
+        <p className="muted">As a guest, your library stays in this browser. Signed in, Epilog’s server also keeps your tracking records and catalog IDs so your devices stay in sync. Catalog lookups send search text or catalog IDs to the relevant providers, and artwork loads from their servers. <Link to="/privacy" className="text-link">Privacy policy</Link></p>
         <h3>Install</h3>
         <p className="muted">Use your browser’s install option, or Add to Home Screen in Safari. After one online visit, saved titles work offline.</p>
         <h3>Catalog credits</h3>

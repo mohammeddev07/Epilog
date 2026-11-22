@@ -89,3 +89,30 @@ export async function signIn(credential: string, choose: (question: 'merge-or-re
   await library.enqueueAll()
   await sync.syncNow()
 }
+
+// The Worker's CSRF guard wants JSON on every mutating request, bodies or not.
+const json = { 'Content-Type': 'application/json' }
+
+/**
+ * Signs out of the server, then this device: `keep` leaves the library as a guest's, otherwise it's removed.
+ * Resolves `false` when the server couldn't be reached; this device signs out anyway and the session expires on its own.
+ */
+export async function signOut(keep: boolean): Promise<boolean> {
+  await sync.syncNow() // push what's queued while the session still works
+  const reached = await fetch('/api/auth/logout', { method: 'POST', headers: json }).then(
+    (response) => response.ok || response.status === 401,
+    () => false,
+  )
+  if (keep) await library.setAccount(undefined)
+  else await library.clearAll()
+  await sync.syncNow()
+  return reached
+}
+
+/** Erases the account and its synced records on the server; this device keeps its library as a guest's. Throws, changing nothing, when the server doesn't confirm. */
+export async function deleteAccount(): Promise<void> {
+  const response = await fetch('/api/account', { method: 'DELETE', headers: json })
+  if (!response.ok) throw new Error(`Account deletion failed with ${response.status}`)
+  await library.setAccount(undefined)
+  await sync.syncNow()
+}

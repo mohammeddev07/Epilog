@@ -639,7 +639,7 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
 
   async function mergeSnapshot() {
     const snapshot = await getMeta('mergeSnapshot')
-    return snapshot && snapshot.expiresAt > clock() ? snapshot.backup : undefined
+    return snapshot && snapshot.expiresAt > clock() ? { backup: snapshot.backup, savedAt: snapshot.expiresAt - mergeSnapshotAge } : undefined
   }
 
   /** Clears the library, outbox and account; cached catalog responses stay. */

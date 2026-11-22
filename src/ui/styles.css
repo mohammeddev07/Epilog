@@ -357,6 +357,9 @@ svg { flex: none; }
 .settings-group .action-row .button { min-block-size: var(--size-control); padding-block: var(--space-2); font-size: var(--text-sm); }
 .settings-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-3) var(--space-6); }
 .settings-row > .form-error { grid-column: 1 / -1; }
+.settings-group > .text-action { justify-self: start; }
+.account-summary { display: grid; }
+.account-panel h2:focus { outline: none; }
 .settings-credits .provider-logo { min-height: auto; margin-block: var(--space-1); }
 
 /* ---- Welcome (first visit) and privacy ---- */

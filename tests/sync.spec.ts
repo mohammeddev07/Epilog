@@ -1,6 +1,8 @@
 import AxeBuilder from '@axe-core/playwright'
+import { readFile } from 'node:fs/promises'
 import { expect, test } from '@playwright/test'
 import type { BrowserContext, Page } from '@playwright/test'
+import { parseBackup } from '../src/domain/backup-file'
 import { mergeChange } from '../src/domain/sync'
 import type { EntryData, SyncChange } from '../src/domain/sync'
 
@@ -38,7 +40,8 @@ const entry = (id: string, catalogRef: string, at: number): SyncChange => {
 /** In-memory stand-in for the Worker's account and sync routes: one record set per Google `sub`. */
 function fakeServer() {
   const users = new Map<string, { revision: number; rows: Map<string, { change: SyncChange; revision: number }> }>()
-  const network = { offline: false }
+  const network = { offline: false, expired: false }
+  const calls = { logout: 0, deleted: 0 }
   const user = (sub: string) => {
     if (!users.has(sub)) users.set(sub, { revision: 0, rows: new Map() })
     return users.get(sub)!
@@ -61,11 +64,23 @@ function fakeServer() {
     await context.route('**/api/config', (route) => route.fulfill({ json: { googleClientId: 'test-client.apps.googleusercontent.com' } }))
     await context.route('**/api/auth/*', (route) => {
       expect(route.request().headers()['content-type']).toBe('application/json')
-      return route.fulfill({ json: { sub, email: `${sub}@example.test`, name: 'Ada' } })
+      if (!route.request().url().endsWith('/logout')) return route.fulfill({ json: { sub, email: `${sub}@example.test`, name: 'Ada' } })
+      if (network.offline) return route.abort('internetdisconnected')
+      calls.logout++
+      return route.fulfill({ status: 204 })
+    })
+    await context.route('**/api/account', (route) => {
+      expect(route.request().method()).toBe('DELETE')
+      expect(route.request().headers()['content-type']).toBe('application/json')
+      if (network.offline) return route.abort('internetdisconnected')
+      users.delete(sub)
+      calls.deleted++
+      return route.fulfill({ status: 204 })
     })
     await context.route('**/api/sync', (route) => {
       expect(route.request().headers()['content-type']).toBe('application/json')
       if (network.offline) return route.abort('internetdisconnected') // routes still answer under setOffline
+      if (network.expired) return route.fulfill({ status: 401, json: { error: 'unauthorized' } })
       const { cursor, changes } = route.request().postDataJSON() as { cursor: number; changes: SyncChange[] }
       push(sub, changes)
       const account = user(sub)
@@ -86,7 +101,7 @@ function fakeServer() {
     })
   }
 
-  return { network, push, records, attach }
+  return { network, calls, push, records, attach }
 }
 
 async function open(browser: import('@playwright/test').Browser, server: ReturnType<typeof fakeServer>, sub: string) {
@@ -277,6 +292,158 @@ test('welcome and privacy pages pass axe', async ({ browser }) => {
     await expect(page.getByRole('heading', { level: 1, name: 'Privacy policy' })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'What’s stored' })).toBeVisible()
     expect((await axe()).violations).toEqual([])
+  } finally {
+    await context.close()
+  }
+})
+
+async function signInFromWelcome(page: Page) {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Continue with Google' }).click()
+  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
+}
+
+const accountPanel = (page: Page) => page.getByRole('region', { name: 'Account' })
+
+test('Settings shows the account and last sync, and a sync error offers Try again', async ({ browser }) => {
+  const server = fakeServer()
+  const { context, page } = await open(browser, server, 'sub-ada')
+  try {
+    await signInFromWelcome(page)
+    await page.goto('/settings')
+    const account = accountPanel(page)
+    await expect(account.getByText('Ada', { exact: true })).toBeVisible()
+    await expect(account.getByText('sub-ada@example.test')).toBeVisible()
+    await expect(account.getByRole('status')).toContainText('Last synced')
+    await expect(page.getByRole('button', { name: 'Continue with Google' })).toHaveCount(0)
+    expect((await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()).violations).toEqual([])
+
+    server.network.offline = true
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+    await expect(account.getByRole('alert')).toHaveText('Sync didn’t finish. Epilog will try again shortly.')
+    server.network.offline = false
+    await account.getByRole('button', { name: 'Try again' }).click()
+    await expect(account.getByRole('alert')).toHaveCount(0)
+    await expect(account.getByRole('status')).toContainText('Last synced')
+  } finally {
+    await context.close()
+  }
+})
+
+test('a guest can sign in from Settings, and an expired session asks to sign in again without losing queued edits', async ({ browser }) => {
+  const server = fakeServer()
+  const { context, page } = await open(browser, server, 'sub-ada')
+  try {
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Continue as guest' }).click()
+    await signInFromSettings(page)
+    const account = accountPanel(page)
+    await expect(account.getByText('sub-ada@example.test')).toBeVisible()
+    await expect(account.getByRole('heading', { name: 'Account' })).toBeFocused()
+
+    server.network.expired = true
+    await logFromSearch(page, 'Sun Harbor')
+    await page.goto('/settings')
+    await expect(account.getByRole('heading', { name: 'Sign in again' })).toBeVisible()
+    await page.waitForTimeout(2500) // past the sync debounce: nothing reaches the server
+    expect(server.records('sub-ada', 'entry')).toHaveLength(0)
+
+    server.network.expired = false
+    await account.getByRole('button', { name: 'Continue with Google' }).click()
+    await expect(account.getByRole('status')).toContainText('Last synced')
+    expect(server.records('sub-ada', 'entry').map(({ data }) => (data as EntryData).catalogRef)).toEqual([sun.id])
+  } finally {
+    await context.close()
+  }
+})
+
+test('signing out can keep or remove this device’s copy', async ({ browser }) => {
+  const server = fakeServer()
+  server.push('sub-ada', [entry('m-moon', moon.id, 1000)])
+  const { context, page } = await open(browser, server, 'sub-ada')
+  const account = accountPanel(page)
+  try {
+    await signInFromWelcome(page)
+    await page.goto('/settings')
+    await account.getByRole('button', { name: 'Sign out' }).click()
+    await page.getByRole('dialog', { name: 'Sign out?' }).getByRole('button', { name: 'Keep this device’s copy' }).click()
+    await expect(account.getByRole('heading', { name: 'Account' })).toBeFocused()
+    await expect(account.getByRole('status')).toHaveText('Signed out. This device keeps its library.')
+    await expect(account.getByRole('button', { name: 'Continue with Google' })).toBeVisible()
+    expect(server.calls.logout).toBe(1)
+    await expect(await movieTitles(page)).toContainText('Moon Lantern')
+
+    // Offline, the server can't hear about it, but this device still signs out and says so.
+    await signInFromSettings(page)
+    await expect(account.getByText('sub-ada@example.test')).toBeVisible()
+    server.network.offline = true
+    await account.getByRole('button', { name: 'Sign out' }).click()
+    await page.getByRole('dialog', { name: 'Sign out?' }).getByRole('button', { name: 'Remove it from this device' }).click()
+    await expect(account.getByRole('status')).toHaveText('Signed out, and this device’s copy was removed. Epilog’s server couldn’t be reached, so its session ends on its own.')
+    expect(server.calls.logout).toBe(1)
+    await page.goto('/library')
+    await expect(page.getByRole('heading', { name: 'Your library is empty' })).toBeVisible()
+  } finally {
+    await context.close()
+  }
+})
+
+test('deleting the account erases server data and keeps the local library', async ({ browser }) => {
+  const server = fakeServer()
+  server.push('sub-ada', [entry('m-moon', moon.id, 1000)])
+  const { context, page } = await open(browser, server, 'sub-ada')
+  const account = accountPanel(page)
+  const question = page.getByRole('dialog', { name: 'Delete your account?' })
+  try {
+    await signInFromWelcome(page)
+    await page.goto('/settings')
+
+    // A failed request changes nothing.
+    server.network.offline = true
+    await account.getByRole('button', { name: 'Delete account' }).click()
+    await expect(question.getByText('This erases your synced library from Epilog’s server. This device keeps its copy.')).toBeVisible()
+    await expect(question.getByRole('button', { name: 'Keep account' })).toBeFocused()
+    await question.getByRole('button', { name: 'Delete account' }).click()
+    await expect(question.getByRole('alert')).toHaveText('Couldn’t delete your account. Check your connection and try again.')
+    await question.getByRole('button', { name: 'Keep account' }).click()
+    await expect(question).toBeHidden()
+    await expect(account.getByText('sub-ada@example.test')).toBeVisible()
+    expect(server.records('sub-ada', 'entry')).toHaveLength(1)
+
+    server.network.offline = false
+    await account.getByRole('button', { name: 'Delete account' }).click()
+    await question.getByRole('button', { name: 'Delete account' }).click()
+    await expect(question).toBeHidden()
+    await expect(account.getByRole('status')).toHaveText('Your account was deleted. This device keeps its library.')
+    await expect(account.getByRole('heading', { name: 'Account' })).toBeFocused()
+    await expect(account.getByRole('button', { name: 'Continue with Google' })).toBeVisible()
+    expect(server.calls.deleted).toBe(1)
+    expect(server.records('sub-ada', 'entry')).toHaveLength(0)
+    await expect(await movieTitles(page)).toContainText('Moon Lantern')
+  } finally {
+    await context.close()
+  }
+})
+
+test('the pre-merge library can be exported for 30 days', async ({ browser }) => {
+  const { context, page } = await open(browser, fakeServer(), 'sub-ada')
+  const exportButton = page.getByRole('button', { name: /^Export library from before sign-in \(.+\)$/ })
+  try {
+    await logFromSearch(page, 'Moon Lantern')
+    await page.goto('/settings')
+    await expect(exportButton).toHaveCount(0)
+    await page.getByRole('button', { name: 'Continue with Google' }).click()
+    await expect(accountPanel(page).getByText('sub-ada@example.test')).toBeVisible()
+    const downloadPending = page.waitForEvent('download')
+    await exportButton.click()
+    const download = await downloadPending
+    expect(download.suggestedFilename()).toMatch(/^epilog-library-before-sign-in-\d{4}-\d{2}-\d{2}\.json$/)
+    expect(parseBackup(await readFile(await download.path(), 'utf-8')).entries).toHaveLength(1)
+
+    await page.clock.install({ time: Date.now() + 31 * 24 * 60 * 60_000 })
+    await page.reload()
+    await expect(page.getByRole('button', { name: 'Export backup' })).toBeVisible()
+    await expect(exportButton).toHaveCount(0)
   } finally {
     await context.close()
   }

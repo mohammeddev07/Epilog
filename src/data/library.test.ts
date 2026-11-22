@@ -441,7 +441,7 @@ describe('IndexedDB library', () => {
     await store.save(film, { status: 'Planned' })
     await store.cacheResponse('search', 'tmdb', { items: [] })
     await store.saveMergeSnapshot()
-    expect((await store.mergeSnapshot())?.entries).toHaveLength(1)
+    expect((await store.mergeSnapshot())?.backup.entries).toHaveLength(1)
     await store.setAccount(account)
     await store.clearAll()
     expect((await store.read()).size).toBe(0)
