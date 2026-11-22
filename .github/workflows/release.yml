@@ -87,6 +87,10 @@ jobs:
             echo "::error::Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in GitHub Actions secrets."
             exit 1
           fi
+          if grep -q '<set after' wrangler.jsonc; then
+            echo "::error::Run npx wrangler d1 create epilog and set database_id in wrangler.jsonc (see README)."
+            exit 1
+          fi
           npx --no-install wrangler d1 migrations apply epilog --remote
           npx --no-install wrangler deploy
           npx --no-install wrangler pages deploy --cwd pages --branch release

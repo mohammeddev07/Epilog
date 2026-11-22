@@ -105,9 +105,11 @@ Until `GOOGLE_CLIENT_ID` is set, the account routes return 404 and Epilog works 
 
 ### Releases from GitHub Actions
 
+**Before the next release,** create the D1 database and set `database_id` in `wrangler.jsonc`. Every release, including the manual re-run, fails until you do, because the workflow applies the D1 migrations and `wrangler deploy` resolves the `DB` binding. Follow steps 3 to 5 of [Google sign-in and sync](#google-sign-in-and-sync) (steps 4 and 5 create the database and apply the migrations), then continue with the [Cloudflare deployment steps](#personal-deployment-on-cloudflare) as needed.
+
 [Release workflow](.github/workflows/release.yml) tests and deploys pushes to `release`, including merged pull requests. After Cloudflare accepts the deployment, it publishes a GitHub release and tag. The first tag comes from `package.json`. Later releases increment the latest stable tag’s patch version unless `package.json` specifies a higher version.
 
-Create the `release` branch before the first production merge. Set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as GitHub Actions secrets, preferably on the `production` environment. Scope the token to the Cloudflare account that owns Epilog and grant Workers Scripts Edit and Cloudflare Pages Edit. The catalog credentials stay in the deployed Worker’s secret bindings. [Cloudflare’s CI authentication guide](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/#1-authentication).
+Create the `release` branch before the first production merge. Set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as GitHub Actions secrets, preferably on the `production` environment. Scope the token to the Cloudflare account that owns Epilog and grant Workers Scripts Edit, Cloudflare Pages Edit, and D1 Edit. The catalog credentials stay in the deployed Worker’s secret bindings. [Cloudflare’s CI authentication guide](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/#1-authentication).
 
 Once the workflow is on GitHub’s default branch, select **Actions → Release → Run workflow** and enter an existing tag from `release` history, such as `v0.1.0`. This builds and deploys the selected revision to the production Worker and Pages project using its Wrangler configuration. It creates no additional GitHub release. [GitHub’s manual workflow guide](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
 
