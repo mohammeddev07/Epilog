@@ -7,6 +7,40 @@ export class CatalogFailure extends Error {
   }
 }
 
+export const responseHeaders = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
+const errors = {
+  400: 'invalid_request',
+  401: 'unauthorized',
+  403: 'forbidden',
+  404: 'not_found',
+  405: 'method_not_allowed',
+  413: 'too_large',
+  429: 'rate_limited',
+  502: 'provider_unavailable',
+  503: 'provider_unavailable',
+  504: 'provider_timeout',
+} as const
+
+export function errorResponse(error: unknown): Response {
+  const failureStatus = error instanceof CatalogFailure ? error.status : error instanceof URIError ? 400 : 502
+  const status = failureStatus in errors ? failureStatus as keyof typeof errors : 503
+  const headers = new Headers(responseHeaders)
+  if (error instanceof CatalogFailure && error.retryAfter) headers.set('Retry-After', String(error.retryAfter))
+  return Response.json({ error: errors[status] }, { status, headers })
+}
+
+// Pages forwards /api/* to this Worker, so every legitimate request is same-origin.
+export function rejectCrossSite(request: Request, url: URL) {
+  const origin = request.headers.get('origin')
+  if ((origin && origin !== url.origin) || request.headers.get('sec-fetch-site') === 'cross-site') {
+    throw new CatalogFailure(403)
+  }
+}
+
+export function isJson(request: Request) {
+  return request.headers.get('content-type')?.toLowerCase().startsWith('application/json') ?? false
+}
+
 export async function readJson(message: Request | Response, limit: number, invalidStatus: number): Promise<unknown> {
   const size = Number(message.headers.get('content-length') ?? 0)
   if (size > limit || !message.body) throw new CatalogFailure(invalidStatus)

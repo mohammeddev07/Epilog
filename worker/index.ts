@@ -3,7 +3,9 @@ import { bookTypes } from '../src/domain/books'
 import { browseCatalogPath, cleanQuery, discoverSections, maxCatalogPage, parseReleasePeriod, queryLimit, sectionPaths } from '../src/domain/catalog'
 import type { BrowseQuery, CatalogItems } from '../src/domain/catalog'
 import { parseCatalogKey } from '../src/domain/identity'
-import { CatalogFailure, readJson, record } from './http'
+import { createAccountRoutes } from './auth'
+import type { D1Database } from './d1'
+import { CatalogFailure, errorResponse, isJson, readJson, record, rejectCrossSite, responseHeaders } from './http'
 import type { FetchProvider } from './http'
 import { IgdbAdapter } from './igdb'
 import { TmdbAdapter } from './tmdb'
@@ -12,23 +14,19 @@ export interface Env {
   TMDB_READ_ACCESS_TOKEN?: string
   IGDB_CLIENT_ID?: string
   IGDB_CLIENT_SECRET?: string
-  CATALOG_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> }
+  CATALOG_RATE_LIMITER?: RateLimiter
+  SYNC_RATE_LIMITER?: RateLimiter
+  DB?: D1Database
+  GOOGLE_CLIENT_ID?: string
+}
+
+export interface RateLimiter {
+  limit(options: { key: string }): Promise<{ success: boolean }>
 }
 
 const routePrefix = '/api/catalog/'
-const responseHeaders = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
 const cacheAge = 20 * 60_000
 const shelfCacheLimit = 64
-const errors = {
-  400: 'invalid_request',
-  403: 'forbidden',
-  404: 'not_found',
-  405: 'method_not_allowed',
-  429: 'rate_limited',
-  502: 'provider_unavailable',
-  503: 'provider_unavailable',
-  504: 'provider_timeout',
-} as const
 
 type Shelf = CatalogItems
 
@@ -48,7 +46,10 @@ function readBrowse(mode: string | undefined, params: URLSearchParams): { query:
   throw new CatalogFailure(404)
 }
 
-export function createCatalogWorker(fetcher: FetchProvider = (input, init) => fetch(input, init)) {
+export function createCatalogWorker(
+  fetcher: FetchProvider = (input, init) => fetch(input, init),
+  accounts = createAccountRoutes(),
+) {
   const books = new BookAdapter(fetcher)
   const tmdb = new TmdbAdapter(fetcher)
   const igdb = new IgdbAdapter(fetcher)
@@ -56,13 +57,12 @@ export function createCatalogWorker(fetcher: FetchProvider = (input, init) => fe
 
   return {
     async fetch(request: Request, env: Env): Promise<Response> {
+      const account = await accounts.fetch(request, env)
+      if (account) return account
       try {
         const url = new URL(request.url)
         if (!url.pathname.startsWith(routePrefix)) throw new CatalogFailure(404)
-        const origin = request.headers.get('origin')
-        if ((origin && origin !== url.origin) || request.headers.get('sec-fetch-site') === 'cross-site') {
-          throw new CatalogFailure(403)
-        }
+        rejectCrossSite(request, url)
         const path = url.pathname.slice(routePrefix.length).split('/')
         const [action, key, segment] = path
         if (path.length > 3) throw new CatalogFailure(404)
@@ -76,7 +76,7 @@ export function createCatalogWorker(fetcher: FetchProvider = (input, init) => fe
 
         if (action === 'search' && (key === 'tmdb' || key === 'igdb' || key === 'openlibrary') && path.length === 2) {
           const type = bookTypes.find((item) => item === url.searchParams.get('type'))
-          if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json') ||
+          if (!isJson(request) ||
             (url.search && (key !== 'openlibrary' || !type || url.searchParams.size !== 1))) throw new CatalogFailure(400)
           const body = record(await readJson(request, 1024, 400))
           if (typeof body?.query !== 'string') throw new CatalogFailure(400)
@@ -128,11 +128,7 @@ export function createCatalogWorker(fetcher: FetchProvider = (input, init) => fe
 
         throw new CatalogFailure(404)
       } catch (error) {
-        const failureStatus = error instanceof CatalogFailure ? error.status : error instanceof URIError ? 400 : 502
-        const status = failureStatus in errors ? failureStatus as keyof typeof errors : 503
-        const headers = new Headers(responseHeaders)
-        if (error instanceof CatalogFailure && error.retryAfter) headers.set('Retry-After', String(error.retryAfter))
-        return Response.json({ error: errors[status] }, { status, headers })
+        return errorResponse(error)
       }
     },
   }
