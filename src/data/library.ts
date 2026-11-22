@@ -613,6 +613,19 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
     })
   }
 
+  /** Commits a sync response in one transaction, only while `sub` is still the signed-in account; false means nothing was written. */
+  async function commitSync(sub: string, sent: readonly SyncChange[],
+    response: { cursor: number; changes: SyncChange[]; remap: Record<string, string>; reset?: true }) {
+    return db.transaction('rw', tables, async () => {
+      if ((await getMeta('account'))?.sub !== sub) return false
+      await (response.reset ? resetRemote : applyRemote)(response.changes, response.remap)
+      // After applying: a change the response rewrote stays queued and goes up again next page.
+      await acknowledge(sent)
+      await setCursor(response.cursor, clock())
+      return true
+    })
+  }
+
   /** Queues every local record, for the first merge into an account. */
   async function enqueueAll() {
     return db.transaction('rw', tables, async () => enqueue(await localKeys(), clock()))
@@ -656,7 +669,7 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
   return {
     read, watch, save, completeToday, uncomplete, savePreference, setEpisode, remove, exportBackup, previewRestore, applyRestore,
     purgeExpired, refreshSnapshot, readResponse, cacheResponse,
-    account, setAccount, lastSub, setCursor, pendingChanges, acknowledge, applyRemote, resetRemote, enqueueAll,
+    account, setAccount, lastSub, setCursor, pendingChanges, acknowledge, applyRemote, resetRemote, commitSync, enqueueAll,
     saveMergeSnapshot, mergeSnapshot, clearAll, storeSnapshot, missingSnapshots,
     close: () => db.close(),
     deleteDatabase: () => db.delete(),

@@ -63,12 +63,12 @@ export function createSync(store: LibraryStore, options: { fetch?: typeof fetch;
         }
         if (!response.ok) throw new Error(`Sync failed with ${response.status}`)
         const body = await response.json() as SyncResponse
-        await (body.reset ? store.resetRemote : store.applyRemote)(body.changes, body.remap)
-        // After applying: a change the response rewrote stays queued and goes up again next page.
-        await store.acknowledge(sent)
-        lastSyncAt = Date.now()
-        await store.setCursor(body.cursor, lastSyncAt)
-        if (!body.more && !(await store.pendingChanges(1)).length) break
+        // Signed out or switched accounts while the request was out: this response belongs to nobody here now.
+        if (!await store.commitSync(account.sub, sent, body)) return set(await store.account() ? { status: 'idle' } : { status: 'guest' })
+        if (!body.more && !(await store.pendingChanges(1)).length) {
+          lastSyncAt = (await store.account())?.lastSyncAt
+          break
+        }
       }
       failures = 0
       set({ status: 'idle', lastSyncAt })

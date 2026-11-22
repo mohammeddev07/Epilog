@@ -40,6 +40,18 @@ function create(store: LibraryStore, fetch: typeof globalThis.fetch) {
   return createSync(store, { fetch, setTimer })
 }
 
+/** A reply that stays open until released, to change the device while a request is out. */
+function hold() {
+  let entered!: () => void
+  let release!: (reply: Reply) => void
+  const inside = new Promise<void>((resolve) => { entered = resolve })
+  const reply = () => {
+    entered()
+    return new Promise<Reply>((resolve) => { release = resolve })
+  }
+  return { inside, reply, release: (value: Reply) => release(value) }
+}
+
 async function runTimer() {
   await timers.shift()!.run()
 }
@@ -217,6 +229,54 @@ describe('sync loop', () => {
     expect(timers).toEqual([])
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(fetch).toHaveBeenCalledTimes(4)
+  })
+
+  it('signing out with clearAll mid-cycle leaves the library empty after the response lands', async () => {
+    const other = open()
+    await other.setAccount(account)
+    await other.save({ ...anime, id: 'remote-anime' }, { status: 'Planned' })
+    const remote = await other.pendingChanges(500)
+    const store = open()
+    await store.setAccount(account)
+    await store.savePreference(film, { kind: 'like', value: true })
+    const held = hold()
+    const { fetch } = server(held.reply)
+    const sync = create(store, fetch)
+    const cycle = sync.syncNow()
+    await held.inside
+    await store.clearAll()
+    held.release({ body: { cursor: 7, changes: remote } })
+    await cycle
+    expect((await store.read()).size).toBe(0)
+    expect(await store.account()).toBeUndefined()
+    expect(sync.state()).toEqual({ status: 'guest' })
+    expect(timers).toEqual([])
+  })
+
+  it('switching to another account mid-cycle leaves B’s library, cursor and outbox untouched', async () => {
+    const other = open()
+    await other.setAccount(account)
+    await other.save({ ...anime, id: 'remote-anime' }, { status: 'Planned' })
+    const remote = await other.pendingChanges(500)
+    const store = open()
+    await store.setAccount(account)
+    await store.savePreference(film, { kind: 'like', value: true })
+    const held = hold()
+    const { fetch } = server(held.reply)
+    const sync = create(store, fetch)
+    const cycle = sync.syncNow()
+    await held.inside
+    await store.setAccount(undefined)
+    await store.setAccount({ sub: 's2', email: 'b@example.test', name: 'B' })
+    await store.enqueueAll() // B's queue now holds the same film change A sent
+    const before = { entries: [...(await store.read()).keys()], account: await store.account(), pending: await store.pendingChanges(500) }
+    held.release({ body: { cursor: 7, changes: remote } })
+    await cycle
+    expect({ entries: [...(await store.read()).keys()], account: await store.account(), pending: await store.pendingChanges(500) }).toEqual(before)
+    expect(before.pending).toHaveLength(1)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(sync.state()).toEqual({ status: 'idle' })
+    expect(timers).toEqual([])
   })
 
   it('halves the page after a 413', async () => {
