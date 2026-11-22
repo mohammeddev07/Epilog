@@ -83,8 +83,10 @@ export async function signIn(credential: string, choose: (question: 'merge-or-re
   const profile = profileSchema.parse(await response.json())
   const owner = (await library.account())?.sub ?? await library.lastSub()
   const kept = (await library.read()).size > 0
-  if (kept && owner && owner !== profile.sub && await choose('merge-or-replace') === 'replace') await library.clearAll()
-  else if (kept) await library.saveMergeSnapshot()
+  const replace = kept && owner && owner !== profile.sub && await choose('merge-or-replace') === 'replace'
+  // Either way the library from before sign-in stays exportable from Backup & Restore for 30 days.
+  if (kept) await library.saveMergeSnapshot()
+  if (replace) await library.clearAll(true)
   await library.setAccount(profile)
   await library.enqueueAll()
   await sync.syncNow()
@@ -93,12 +95,21 @@ export async function signIn(credential: string, choose: (question: 'merge-or-re
 // The Worker's CSRF guard wants JSON on every mutating request, bodies or not.
 const json = { 'Content-Type': 'application/json' }
 
+/** Thrown by `signOut(false)` when queued changes couldn't be pushed: nothing was removed and the device is still signed in. */
+export class UnsyncedChangesError extends Error {
+  constructor() {
+    super('Some changes on this device couldn’t be synced, so its library was kept and you’re still signed in. Try again when you’re online, or keep this device’s copy.')
+  }
+}
+
 /**
  * Signs out of the server, then this device: `keep` leaves the library as a guest's, otherwise it's removed.
  * Resolves `false` when the server couldn't be reached; this device signs out anyway and the session expires on its own.
+ * Removing never deletes changes that didn't sync: it throws `UnsyncedChangesError` and changes nothing instead.
  */
 export async function signOut(keep: boolean): Promise<boolean> {
   await sync.syncNow() // push what's queued while the session still works
+  if (!keep && (await library.pendingChanges(1)).length) throw new UnsyncedChangesError()
   const reached = await fetch('/api/auth/logout', { method: 'POST', headers: json }).then(
     (response) => response.ok || response.status === 401,
     () => false,

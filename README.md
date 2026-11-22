@@ -103,6 +103,8 @@ Sign-in is optional and syncs the library across devices. It stores the Google a
 
 Until `GOOGLE_CLIENT_ID` is set, the account routes return 404 and Epilog works as it does without sign-in. Sync requests use the `SYNC_RATE_LIMITER` binding, and the Worker allows requests without it if the binding is missing.
 
+D1's Free plan allows 100,000 rows written a day, and every index entry counts as a row. Each synced record writes about four rows, so a first merge of a 500-title library (about 2,500 records) writes about 10,000 rows, and an ordinary edit about ten. Syncs that change nothing write no rows. That allows about ten such first merges a day, or a few dozen to a hundred active people a day. Workers Paid lifts the limit.
+
 ### Releases from GitHub Actions
 
 **Before the next release,** create the D1 database and set `database_id` in `wrangler.jsonc`. Every release, including the manual re-run, fails until you do, because the workflow applies the D1 migrations and `wrangler deploy` resolves the `DB` binding. Follow steps 3 to 5 of [Google sign-in and sync](#google-sign-in-and-sync) (steps 4 and 5 create the database and apply the migrations), then continue with the [Cloudflare deployment steps](#personal-deployment-on-cloudflare) as needed.

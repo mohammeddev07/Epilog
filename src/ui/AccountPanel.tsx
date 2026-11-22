@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { deleteAccount, signOut, useGoogleClientId } from '../data/account'
+import { deleteAccount, signOut, UnsyncedChangesError, useGoogleClientId } from '../data/account'
 import { library } from '../data/library'
 import { sync } from '../data/sync'
 import { useSync } from '../data/useSync'
@@ -60,8 +60,8 @@ export function AccountPanel() {
       refocus.current = true
       setSheet(undefined)
       setNotice(message) // the account itself re-reads with the sync state, which both actions end by changing
-    } catch {
-      setError(failure)
+    } catch (cause) {
+      setError(cause instanceof UnsyncedChangesError ? cause.message : failure)
     } finally {
       setBusy(false)
     }
@@ -122,7 +122,7 @@ export function AccountPanel() {
         <div className="sheet-body">
           <SheetHeader id="sign-out-heading" title="Sign out?" closeLabel="Cancel" onClose={close} disabled={busy} />
           <p className="muted">Your synced library stays in your account. Keep this device’s copy to go on using it as a guest, or remove it.</p>
-          {unsynced ? <p className="muted">Some changes on this device haven’t synced yet. Removing this device’s copy loses them.</p> : null}
+          {unsynced ? <p className="muted">Some changes on this device haven’t synced yet. Removing this device’s copy syncs them first, and keeps the library if they can’t be synced.</p> : null}
           <div className="sheet-actions">
             <button type="button" className="button button-primary" data-sign-out-focus disabled={busy} onClick={() => void leave(true)}>Keep this device’s copy</button>
             <button type="button" className="button button-danger" disabled={busy} onClick={() => void leave(false)}>Remove it from this device</button>

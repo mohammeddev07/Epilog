@@ -275,8 +275,29 @@ test('a different account on a kept library asks to merge or replace', async ({ 
     await expect(list).toContainText('Sun Harbor')
     await expect(list).not.toContainText('Moon Lantern')
     expect(server.records('sub-grace', 'entry').map(({ id }) => id)).toEqual(['m-sun'])
+
+    // The replaced library stays exportable from Backup & Restore.
+    await page.goto('/settings')
+    const downloadPending = page.waitForEvent('download')
+    await page.getByRole('button', { name: /^Export library from before sign-in \(.+\)$/ }).click()
+    expect(parseBackup(await readFile(await (await downloadPending).path(), 'utf-8')).entries).toHaveLength(1)
   } finally {
     await context.close()
+  }
+})
+
+test('Settings mentions Epilog’s server only where sign-in is available', async ({ browser }) => {
+  const info = (page: Page) => page.getByRole('region', { name: 'App Information' })
+  const unconfigured = await browser.newContext()
+  const { context, page } = await open(browser, fakeServer(), 'sub-ada')
+  try {
+    const guest = await unconfigured.newPage()
+    await guest.goto('/settings')
+    await expect(info(guest)).toContainText('As a guest, your library stays in this browser. Catalog lookups')
+    await page.goto('/settings')
+    await expect(info(page)).toContainText('Signed in, Epilog’s server also keeps your tracking records and catalog IDs')
+  } finally {
+    await Promise.all([context.close(), unconfigured.close()])
   }
 })
 
@@ -373,12 +394,30 @@ test('signing out can keep or remove this device’s copy', async ({ browser }) 
     expect(server.calls.logout).toBe(1)
     await expect(await movieTitles(page)).toContainText('Moon Lantern')
 
-    // Offline, the server can't hear about it, but this device still signs out and says so.
+    // Offline, with an edit that hasn't synced: removing would lose it, so nothing changes and the dialog says why.
     await signInFromSettings(page)
     await expect(account.getByText('sub-ada@example.test')).toBeVisible()
     server.network.offline = true
+    await logFromSearch(page, 'Sun Harbor')
+    await page.goto('/settings')
+    const dialog = page.getByRole('dialog', { name: 'Sign out?' })
     await account.getByRole('button', { name: 'Sign out' }).click()
-    await page.getByRole('dialog', { name: 'Sign out?' }).getByRole('button', { name: 'Remove it from this device' }).click()
+    await expect(dialog.getByText('Some changes on this device haven’t synced yet. Removing this device’s copy syncs them first, and keeps the library if they can’t be synced.')).toBeVisible()
+    await dialog.getByRole('button', { name: 'Remove it from this device' }).click()
+    await expect(dialog.getByRole('alert')).toHaveText('Some changes on this device couldn’t be synced, so its library was kept and you’re still signed in. Try again when you’re online, or keep this device’s copy.')
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(account.getByText('sub-ada@example.test')).toBeVisible()
+    expect(server.calls.logout).toBe(1)
+    await expect(await movieTitles(page)).toContainText('Sun Harbor')
+
+    // Once it has synced, removing works even while the server can't hear about the sign-out, and says so.
+    server.network.offline = false
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+    await expect.poll(() => server.records('sub-ada', 'entry').length).toBe(2)
+    await page.goto('/settings')
+    server.network.offline = true
+    await account.getByRole('button', { name: 'Sign out' }).click()
+    await dialog.getByRole('button', { name: 'Remove it from this device' }).click()
     await expect(account.getByRole('status')).toHaveText('Signed out, and this device’s copy was removed. Epilog’s server couldn’t be reached, so its session ends on its own.')
     expect(server.calls.logout).toBe(1)
     await page.goto('/library')
