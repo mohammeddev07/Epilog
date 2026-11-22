@@ -6,7 +6,7 @@ import { demoById } from './data/demo'
 import { discoverSections, mediaKey, providerDisplayName } from './domain/catalog'
 import { parseCatalogKey } from './domain/identity'
 import { peekPreview } from './data/catalog-client'
-import { useCatalogDetail, useConnection, demoMode, warmCatalog } from './data/useCatalog'
+import { useCatalogDetail, useConnection, demoMode, useSnapshotHydration, warmCatalog } from './data/useCatalog'
 import { statuses } from './domain/media'
 import { library } from './data/library'
 import { useLibrary } from './data/useLibrary'
@@ -75,6 +75,7 @@ function Application() {
   const [refresh, setRefresh] = useState(0)
   const state = useLibrary(refresh)
   const entries = state.status === 'ready' ? state.entries : noEntries
+  useSnapshotHydration(entries)
   const [theme, setTheme] = useState<Theme>(readTheme)
   const [storageError, setStorageError] = useState(false)
   const [session, setSession] = useState<LogSession | null>(null)

@@ -1,9 +1,10 @@
 import type { BookType } from '../domain/books'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { browseCatalogPath, cleanQuery, defaultPopularCategory, defaultReleasePeriod, discoverSections } from '../domain/catalog'
 import type { BrowseQuery, CatalogPayload, DiscoverSection, Provider } from '../domain/catalog'
-import { catalogKey } from '../domain/identity'
+import { catalogKey, parseCatalogKey } from '../domain/identity'
 import type { CatalogIdentity } from '../domain/identity'
+import type { LibraryEntry } from '../domain/media'
 import { CatalogResponseError, fetchCatalog, rememberPreview } from './catalog-client'
 import { library } from './library'
 
@@ -223,4 +224,71 @@ export function useRuntimeBackfill(identities: readonly CatalogIdentity[]) {
     return () => controller.abort()
   }, [connected, keys])
   return { working: !demoMode && connected && Boolean(keys) && done !== keys }
+}
+
+const hydrationPerMinute = 40
+const hydrationSent: number[] = []
+
+/**
+ * Entries that arrive by sync carry only a catalog ID, and snapshots expire, so some library titles have no name or
+ * poster to show. While online, fetch their details one at a time, most recently updated first, and store each
+ * snapshot; the live library re-renders itself. Stops at the first failure and tries again once the set of missing
+ * titles changes or the connection returns. Skipped in the demo.
+ * ponytail: 40 detail requests per rolling minute (the Worker allows 60, the rest is for interactive use); add a
+ * batch detail endpoint to the Worker if libraries are large enough that this takes too long.
+ */
+export function useSnapshotHydration(entries: ReadonlyMap<string, LibraryEntry>) {
+  const connected = useConnection()
+  const gate = useRef<AbortController>(undefined)
+  const running = useRef<AbortSignal>(undefined)
+  const failedOn = useRef('')
+
+  useEffect(() => {
+    if (demoMode || !connected) return
+    const controller = new AbortController()
+    gate.current = controller
+    failedOn.current = ''
+    return () => {
+      controller.abort()
+      gate.current = undefined
+    }
+  }, [connected])
+
+  useEffect(() => {
+    const signal = gate.current?.signal
+    if (!signal || running.current === signal) return
+    running.current = signal
+    const tried = new Set<string>() // a snapshot that can't be stored must not be fetched again
+    void (async () => {
+      try {
+        for (;;) {
+          const missing = (await library.missingSnapshots()).filter(({ catalogRef }) => !tried.has(catalogRef))
+            .sort((a, b) => (entries.get(b.mediaId)?.updatedAt ?? 0) - (entries.get(a.mediaId)?.updatedAt ?? 0))
+          const key = missing.map(({ catalogRef }) => catalogRef).join(',')
+          if (!missing.length || key === failedOn.current) return
+          while (hydrationSent.length && Date.now() - hydrationSent[0] >= minute) hydrationSent.shift()
+          if (hydrationSent.length >= hydrationPerMinute) {
+            await wait(hydrationSent[0] + minute - Date.now(), signal)
+            continue
+          }
+          hydrationSent.push(Date.now())
+          const { mediaId, catalogRef } = missing[0]
+          tried.add(catalogRef)
+          try {
+            const payload = await fetchCatalog(`detail/${encodeURIComponent(catalogRef)}`, parseCatalogKey(catalogRef)!.provider, undefined, signal)
+            const item = 'items' in payload ? payload.items[0] : undefined
+            if (!item) throw new Error('No details returned.')
+            await library.storeSnapshot(mediaId, item)
+          } catch (cause) {
+            if (!signal.aborted) failedOn.current = key
+            throw cause
+          }
+        }
+      } catch {
+        // Offline, throttled, closed, or unknown title: retried when the missing set changes or the connection returns.
+      } finally {
+        if (running.current === signal) running.current = undefined
+      }
+    })()
+  }, [connected, entries])
 }
