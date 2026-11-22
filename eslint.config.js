@@ -12,4 +12,9 @@ export default [
     languageOptions: { globals: globals.browser },
     ...hooks.configs.flat.recommended,
   },
+  {
+    files: ['worker/**/*.ts'],
+    ignores: ['worker/**/*.test.ts'],
+    rules: { 'no-restricted-imports': ['error', { patterns: [{ group: ['**/test-d1'], message: 'test-d1 is for tests only.' }] }] },
+  },
 ]

@@ -19,6 +19,19 @@ function search(provider: string, query: string, options?: RequestInit) {
   })
 }
 
+it('serves only the configured privacy address without requiring sign-in', async () => {
+  const worker = createCatalogWorker()
+  const url = `${origin}/api/privacy-contact`
+  const contact = { ...env, PRIVACY_CONTACT_EMAIL: ' privacy@example.test ' }
+  const response = await worker.fetch(new Request(url), contact)
+  expect(response.headers.get('Cache-Control')).toBe('no-store')
+  expect(await response.json()).toEqual({ email: 'privacy@example.test' })
+  expect(await (await worker.fetch(new Request(url), env)).json()).toEqual({ email: null })
+  expect(await (await worker.fetch(new Request(url), { PRIVACY_CONTACT_EMAIL: 'invalid' })).json()).toEqual({ email: null })
+  expect((await worker.fetch(new Request(url, { method: 'POST' }), contact)).status).toBe(405)
+  expect(await (await worker.fetch(new Request(`${origin}/api/config`), contact)).json()).toEqual({ googleClientId: '' })
+})
+
 describe('catalog Worker', () => {
   it('searches and browses Open Library books by type, and rejects unknown types', async () => {
     const urls: URL[] = []

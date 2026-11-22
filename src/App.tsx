@@ -6,19 +6,23 @@ import { demoById } from './data/demo'
 import { discoverSections, mediaKey, providerDisplayName } from './domain/catalog'
 import { parseCatalogKey } from './domain/identity'
 import { peekPreview } from './data/catalog-client'
-import { useCatalogDetail, useConnection, demoMode, warmCatalog } from './data/useCatalog'
+import { useCatalogDetail, useConnection, demoMode, useSnapshotHydration, warmCatalog } from './data/useCatalog'
 import { statuses } from './domain/media'
 import { library } from './data/library'
 import { useLibrary } from './data/useLibrary'
+import { sync } from './data/sync'
+import { rememberWelcome, shouldWelcome, useSignInAvailable } from './data/account'
 import type { Episode, LibraryEntry, LogDraft, Media, PreferenceChange, Status } from './domain/media'
 import { Compare } from './screens/Compare'
 import { Dashboard } from './screens/Dashboard'
 import { Details } from './screens/Details'
 import { Library } from './screens/Library'
 import { Popular } from './screens/Popular'
+import { Privacy } from './screens/Privacy'
 import { Search } from './screens/Search'
 import { appearanceKey, Settings, themes } from './screens/Settings'
 import type { Theme } from './screens/Settings'
+import { Welcome } from './screens/Welcome'
 import { readDetailOrigin } from './ui/detail-navigation'
 import type { DetailOrigin } from './ui/detail-navigation'
 import { CatalogFeedback, catalogMessage, CatalogSkeleton, offlineCacheError } from './ui/CatalogFeedback'
@@ -32,10 +36,13 @@ import { iconSize } from './ui/tokens'
 const InstallStatus = lazy(() => import('./ui/InstallStatus'))
 
 // Owl mark (docs/brand/symbol-logos.html #03). Eyes, beak and smile are cut-outs, so it works on any background.
-const owlPath = 'M13 21L16.6 8.6Q17.3 6.6 18.9 8L27 15.5Q32 14 37 15.5L45.1 8Q46.7 6.6 47.4 8.6L51 21V39Q51 57 32 57Q13 57 13 39ZM15.2 28a8.3 8.3 0 1 0 16.6 0a8.3 8.3 0 1 0-16.6 0ZM32.2 28a8.3 8.3 0 1 0 16.6 0a8.3 8.3 0 1 0-16.6 0ZM20.6 26.5a3.9 3.9 0 1 0 7.8 0a3.9 3.9 0 1 0-7.8 0ZM37.6 26.5a3.9 3.9 0 1 0 7.8 0a3.9 3.9 0 1 0-7.8 0ZM29.2 35.4Q32 34.2 34.8 35.4L32.7 40.3Q32 41.4 31.3 40.3ZM19.4 43.6Q20.6 43 21.2 43.9Q25 49.4 32 49.7Q39 49.4 42.8 43.9Q43.4 43 44.6 43.6Q45.2 44.4 44.6 45.2Q40 51.9 32 52.2Q24 51.9 19.4 45.2Q18.8 44.4 19.4 43.6Z'
+const owlPath = 'M13 21L16.6 8.6Q17.3 6.6 18.9 8L27 15.5Q32 14 37 15.5L45.1 8Q46.7 6.6 47.4 8.6L51 21V39Q51 57 32 57Q13 57 13 39ZM15.2 28a8.3 8.3 0 1 0 16.6 0a8.3 8.3 0 1 0-16.6 0ZM32.2 28a8.3 8.3 0 1 0 16.6 0a8.3 8.3 0 1 0-16.6 0ZM29.2 35.4Q32 34.2 34.8 35.4L32.7 40.3Q32 41.4 31.3 40.3ZM19.4 43.6Q20.6 43 21.2 43.9Q25 49.4 32 49.7Q39 49.4 42.8 43.9Q43.4 43 44.6 43.6Q45.2 44.4 44.6 45.2Q40 51.9 32 52.2Q24 51.9 19.4 45.2Q18.8 44.4 19.4 43.6Z'
+// Pupils are drawn separately so the owl can blink.
+const owlPupils = 'M20.6 26.5a3.9 3.9 0 1 0 7.8 0a3.9 3.9 0 1 0-7.8 0ZM37.6 26.5a3.9 3.9 0 1 0 7.8 0a3.9 3.9 0 1 0-7.8 0Z'
 const LogoMark = ({ size }: { size: number }) => (
   <svg width={size} height={size} viewBox="7 4 50 55" aria-hidden="true">
     <path d={owlPath} fill="currentColor" fillRule="evenodd" />
+    <path className="logo-pupils" d={owlPupils} fill="currentColor" />
   </svg>
 )
 
@@ -72,6 +79,7 @@ function Application() {
   const [refresh, setRefresh] = useState(0)
   const state = useLibrary(refresh)
   const entries = state.status === 'ready' ? state.entries : noEntries
+  useSnapshotHydration(entries)
   const [theme, setTheme] = useState<Theme>(readTheme)
   const [storageError, setStorageError] = useState(false)
   const [session, setSession] = useState<LogSession | null>(null)
@@ -82,6 +90,13 @@ function Application() {
   const location = useLocation()
   const navigate = useNavigate()
   const animate = useMotionEnabled()
+  // The welcome screen only greets a visit that opened on the Dashboard; a shared link skips it for the whole visit.
+  const [openedOn] = useState(location.pathname)
+  const [welcomed, setWelcomed] = useState(false)
+  const signInAvailable = useSignInAvailable()
+  const welcoming = !welcomed && state.status === 'ready' && location.pathname === '/' && shouldWelcome(openedOn, entries.size, signInAvailable !== false)
+  const welcomePending = welcoming && signInAvailable === undefined
+  const welcome = welcoming && signInAvailable === true
   const main = useRef<HTMLElement>(null)
   const previous = useRef<{ key: string; origin?: DetailOrigin }>(undefined)
   const [retryDetail, setRetryDetail] = useState(0)
@@ -156,6 +171,22 @@ function Application() {
     }
   }
 
+  useEffect(() => sync.start(), [])
+
+  const showedWelcome = useRef(false)
+  useLayoutEffect(() => {
+    if (welcome) showedWelcome.current = true
+    else if (showedWelcome.current) {
+      showedWelcome.current = false
+      main.current?.querySelector<HTMLElement>('.page:not([hidden]) h1')?.focus({ preventScroll: true })
+    }
+  }, [welcome])
+
+  function finishWelcome(choice: 'guest' | 'google') {
+    rememberWelcome(choice)
+    setWelcomed(true)
+  }
+
   useEffect(() => {
     // Let the visible screen load first, then refresh the shelves people open next.
     const controller = new AbortController()
@@ -203,6 +234,13 @@ function Application() {
     announce(`${media.title} marked ${media.format === 'BOOK' ? 'read' : media.format === 'GAME' ? 'played' : 'watched'}.`)
   }
 
+  async function uncomplete(media: Media) {
+    const { id, removed, completed } = await library.uncomplete(media)
+    if (!removed) setHighlightId(id)
+    announce(completed ? `Latest completion removed from ${media.title}.`
+      : `${media.title} marked ${media.format === 'BOOK' ? 'unread' : media.format === 'GAME' ? 'unplayed' : 'unwatched'}.`)
+  }
+
   async function setEpisode(entry: LibraryEntry, episodes: readonly Episode[], watched: boolean, season?: number) {
     await library.setEpisode(entry.media.id, episodes, watched)
     const name = season === undefined ? episodes[0].title : season === 0 ? 'Specials' : `Season ${season}`
@@ -228,6 +266,14 @@ function Application() {
   }
 
   const linkProps = ({ isActive }: { isActive: boolean }) => isActive ? 'nav-link active' : 'nav-link'
+
+  if (welcome) {
+    return (
+      <MotionConfig reducedMotion={animate ? 'never' : 'always'}>
+        <Welcome logo={<LogoMark size={iconSize.display} />} onGuest={() => finishWelcome('guest')} onSignedIn={() => finishWelcome('google')} />
+      </MotionConfig>
+    )
+  }
 
   return (
     <MotionConfig reducedMotion={animate ? 'never' : 'always'}>
@@ -255,7 +301,7 @@ function Application() {
         </header>
         <main id="main-content" className="main-content" tabIndex={-1} ref={main}>
           <LayoutGroup>
-            {state.status === 'loading' ? <LibraryLoading /> : null}
+            {state.status === 'loading' || welcomePending ? <LibraryLoading /> : null}
             {state.status === 'error' ? (
               <motion.div className="empty-state" variants={rise} initial={animate ? 'hidden' : false} animate="visible">
                 <h1 tabIndex={-1}>Library unavailable</h1>
@@ -263,13 +309,14 @@ function Application() {
                 <button type="button" className="button button-secondary" onClick={retryStorage}>Try again</button>
               </motion.div>
             ) : null}
-            {path && state.status === 'ready' ? (
+            {path && state.status === 'ready' && !welcomePending ? (
               <div className="page" key={browse} hidden={Boolean(detailId)}>
                 {path === '/' ? <Dashboard entries={entries} onLog={openLog} />
                   : path === '/library' ? <Library entries={entries} view={browseParams.get('view')} defaultStatus={defaultStatus} defaultCategory={defaultCategory} highlightId={highlightId} />
-                  : path === '/popular' ? <Popular entries={entries} query={query ?? ''} onLog={openLog} onComplete={completeToday} onPreference={savePreference} />
+                  : path === '/popular' ? <Popular entries={entries} query={query ?? ''} onLog={openLog} onComplete={completeToday} onUncomplete={uncomplete} onPreference={savePreference} />
                   : path === '/search' ? <Search entries={entries} onLog={(media, trigger, status) => openLog(media, trigger, status ?? (browseParams.get('action') === 'watch' ? 'Completed' : undefined))} />
                   : path === '/compare' ? <Compare hash={hash} entries={entries} onLog={openLog} />
+                  : path === '/privacy' ? <Privacy />
                   : path === '/settings' ? <Settings theme={theme} onTheme={changeTheme} storageError={storageError} onRestore={(count) => announce(count ? 'Backup restored.' : 'Backup reviewed. Your library is already up to date.')} />
                   : <MissingPage />}
               </div>
