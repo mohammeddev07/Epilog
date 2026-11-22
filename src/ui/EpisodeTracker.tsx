@@ -9,7 +9,7 @@ import type { Episode, LibraryEntry } from '../domain/media'
 import { rise, useMotionEnabled } from './motion'
 import { iconSize } from './tokens'
 
-export type SetEpisode = (entry: LibraryEntry, episodes: readonly Episode[], watched: boolean) => Promise<void>
+export type SetEpisode = (entry: LibraryEntry, episodes: readonly Episode[], watched: boolean, season?: number) => Promise<void>
 
 export function EpisodeTracker({ entry, episodes = [], onEpisode }: {
   entry: LibraryEntry
@@ -46,11 +46,12 @@ export function EpisodeTracker({ entry, episodes = [], onEpisode }: {
   // Only aired episodes: marking a season never ticks ones that haven't been released yet.
   const today = localDate()
   const aired = seasonEpisodes.filter((episode) => !episode.airDate || episode.airDate <= today)
-  const seasonDone = aired.length > 0 && aired.every(isWatched)
+  const watchedCount = aired.filter(isWatched).length
+  const seasonDone = aired.length > 0 && watchedCount === aired.length
   const seasonName = currentSeason === 0 ? 'specials' : `season ${currentSeason}`
   const feedback = [catalogMessage('episode catalog', catalog.status, catalog.retryAfter), catalog.cacheError ? offlineCacheError : ''].filter(Boolean)
 
-  async function save(episode: Episode | readonly Episode[], checked: boolean) {
+  async function save(episode: Episode | readonly Episode[], checked: boolean, season?: number) {
     const episodes = [episode].flat()
     if (pending.current || !episodes.length) return
     pending.current = true
@@ -58,7 +59,7 @@ export function EpisodeTracker({ entry, episodes = [], onEpisode }: {
     setSelection(episodes[0].season)
     setError('')
     try {
-      await onEpisode(entry, episodes, checked)
+      await onEpisode(entry, episodes, checked, season)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Episode progress could not be saved. Try again.')
     } finally {
@@ -84,7 +85,7 @@ export function EpisodeTracker({ entry, episodes = [], onEpisode }: {
     <section className="shelf detail-section" aria-labelledby="episodes-heading" aria-busy={busy}>
       <h2 id="episodes-heading">Episodes</h2>
       {next ? <p className="muted">Next up · Season {next.season}, episode {next.number} · {next.title}</p> : null}
-      {feedback.length ? <CatalogFeedback messages={feedback} retry={catalog.status === 'offline' ? undefined : () => setRetry((value) => value + 1)} loading={catalog.status === 'loading'} /> : null}
+      <CatalogFeedback key={catalog.key} ready={catalog.status === 'ready'} messages={feedback} retry={catalog.status === 'offline' ? undefined : () => setRetry((value) => value + 1)} loading={catalog.status === 'loading'} />
       {catalog.status === 'loading' && !catalog.episodes ? <CatalogSkeleton /> : null}
       {currentSeason !== undefined ? (
         <>
@@ -94,13 +95,21 @@ export function EpisodeTracker({ entry, episodes = [], onEpisode }: {
             </select>
           </label>
           {aired.length ? (
-            <button
-              type="button" className="button button-secondary season-action" aria-disabled={busy || undefined}
-              onClick={() => void save(seasonDone ? aired : aired.filter((episode) => !isWatched(episode)), !seasonDone)}
-            >
-              {seasonDone ? <CheckCircleIcon size={iconSize.md} weight="fill" aria-hidden="true" /> : <ChecksIcon size={iconSize.md} aria-hidden="true" />}
-              Mark {seasonName} {seasonDone ? 'unwatched' : 'watched'}
-            </button>
+            <>
+              <div className="season-progress">
+                <span>{watchedCount} of {aired.length} aired episodes watched</span>
+                <span className="season-progress-track" aria-hidden="true">
+                  <span style={{ transform: `scaleX(${watchedCount / aired.length})` }} />
+                </span>
+              </div>
+              <button
+                type="button" className="button button-secondary season-action" aria-disabled={busy || undefined}
+                onClick={() => void save(seasonDone ? aired : aired.filter((episode) => !isWatched(episode)), !seasonDone, currentSeason)}
+              >
+                {seasonDone ? <CheckCircleIcon size={iconSize.md} weight="fill" aria-hidden="true" /> : <ChecksIcon size={iconSize.md} aria-hidden="true" />}
+                Mark {seasonName} {seasonDone ? 'unwatched' : 'watched'}
+              </button>
+            </>
           ) : null}
           <motion.ul className="episode-list" key={currentSeason} initial={animate ? 'hidden' : false} animate="visible" variants={rise}>
             {seasonEpisodes.map((episode) => (
@@ -131,7 +140,7 @@ export function EpisodeTracker({ entry, episodes = [], onEpisode }: {
           <button type="submit" className="button button-secondary" disabled={busy}>Mark watched</button>
         </form>
       </details>
-      {error ? <motion.p role="alert" className="form-error" initial={animate ? 'hidden' : false} animate="visible" variants={rise}>{error}</motion.p> : null}
+      {error ? <p role="alert" className="form-error">{error}</p> : null}
     </section>
   )
 }

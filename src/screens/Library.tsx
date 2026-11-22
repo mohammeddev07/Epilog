@@ -1,5 +1,9 @@
+import { readDefaultSort, sorts } from '../ui/library-preferences'
+import type { SortKey } from '../ui/library-preferences'
+import { BookTypeFilter } from '../ui/BookTypeFilter'
+import type { BookType } from '../domain/books'
 import { ArrowLeftIcon, BooksIcon, CaretRightIcon, ChartBarHorizontalIcon, FilmSlateIcon, FunnelSimpleIcon, GameControllerIcon, ShareNetworkIcon, ShootingStarIcon, TelevisionIcon } from '@phosphor-icons/react'
-import { motion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import { useRef, useState } from 'react'
 import { Link } from 'react-router'
 import type { DiscoverSection } from '../domain/catalog'
@@ -7,7 +11,7 @@ import { inCategory, isWatchlisted, matchesQuery, statuses } from '../domain/med
 import type { LibraryEntry } from '../domain/media'
 import { isFinished, libraryStats } from '../domain/stats'
 import { PosterGrid } from '../ui/MediaCards'
-import { rise, useMotionEnabled } from '../ui/motion'
+import { crossfade, rise, useMotionEnabled } from '../ui/motion'
 import { SearchField } from '../ui/SearchField'
 import { ShareDialog } from '../ui/ShareDialog'
 import { SheetHeader } from '../ui/Sheet'
@@ -20,16 +24,10 @@ const rows = [
   { section: 'Movies', label: 'Movies', Icon: FilmSlateIcon, verb: 'watched' },
   { section: 'TV Shows', label: 'TV shows', Icon: TelevisionIcon, verb: 'watched' },
   { section: 'Games', label: 'Games', Icon: GameControllerIcon, verb: 'played' },
+  { section: 'Books', label: 'Books', Icon: BooksIcon, verb: 'read' },
   { section: 'Anime', label: 'Anime', Icon: ShootingStarIcon, verb: 'watched' },
 ] as const satisfies readonly { section: DiscoverSection; label: string; Icon: unknown; verb: string }[]
 
-const sorts = {
-  recent: { label: 'Recent activity', compare: (a: LibraryEntry, b: LibraryEntry) => b.updatedAt - a.updatedAt },
-  added: { label: 'Date added', compare: (a: LibraryEntry, b: LibraryEntry) => (b.createdAt ?? b.updatedAt) - (a.createdAt ?? a.updatedAt) },
-  year: { label: 'Release year', compare: (a: LibraryEntry, b: LibraryEntry) => (b.media.year ?? -Infinity) - (a.media.year ?? -Infinity) || a.media.title.localeCompare(b.media.title) },
-  title: { label: 'Title A–Z', compare: (a: LibraryEntry, b: LibraryEntry) => a.media.title.localeCompare(b.media.title) },
-} as const
-type SortKey = keyof typeof sorts
 
 interface Props {
   entries: ReadonlyMap<string, LibraryEntry>
@@ -41,7 +39,7 @@ interface Props {
 
 export function Library({ view, defaultCategory, ...props }: Props) {
   if (view === 'stats') return <LibraryStats entries={[...props.entries.values()]} />
-  if (defaultCategory) return <LibraryTitles {...props} category={defaultCategory} />
+  if (defaultCategory) return <LibraryTitles key={defaultCategory} {...props} category={defaultCategory} />
   return <LibraryHome entries={props.entries} />
 }
 
@@ -54,7 +52,7 @@ function LibraryHome({ entries }: { entries: ReadonlyMap<string, LibraryEntry> }
   return (
     <>
       <header className="page-intro">
-        <div><h1 tabIndex={-1}>Library</h1><p>Everything you watch and play, in one place.</p></div>
+        <div><h1 tabIndex={-1}>Library</h1><p>Everything you watch, play, and read, in one place.</p></div>
         {entries.size ? (
           <button type="button" className="icon-button" ref={shareButton} aria-label="Share and compare" title="Share and compare" onClick={() => setSharing(true)}>
             <ShareNetworkIcon size={iconSize.md} aria-hidden="true" />
@@ -98,7 +96,7 @@ function LibraryHome({ entries }: { entries: ReadonlyMap<string, LibraryEntry> }
         <div className="empty-state">
           <BooksIcon size={iconSize.display} weight="light" aria-hidden="true" />
           <h2>Your library is empty</h2>
-          <p>Log something you’ve watched or played to get started.</p>
+          <p>Log a title to get started.</p>
           <Link className="button button-secondary" to="/search">Find a title</Link>
         </div>
       ) : null}
@@ -111,19 +109,22 @@ function LibraryTitles({ entries, category, defaultStatus, highlightId }: Omit<P
   const [genre, setGenre] = useState('')
   const [year, setYear] = useState('')
   const [query, setQuery] = useState('')
-  const [sort, setSort] = useState<SortKey>('recent')
+  const [defaultSort] = useState(readDefaultSort)
+  const [sort, setSort] = useState<SortKey>(defaultSort)
+  const [bookType, setBookType] = useState<BookType>()
   const [filtering, setFiltering] = useState(false)
   const filterButton = useRef<HTMLButtonElement>(null)
   const filterDialog = useModal(filtering, filterButton, 'select')
   const animate = useMotionEnabled()
   // Defaults (all statuses, genres and years; recent activity) count as no filter.
-  const active = [status, genre, year].filter(Boolean).length + (sort === 'recent' ? 0 : 1)
+  const active = [status, genre, year, bookType].filter(Boolean).length + (sort === defaultSort ? 0 : 1)
   const label = rows.find(({ section }) => section === category)?.label ?? category
   const categoryEntries = [...entries.values()].filter(({ media }) => inCategory(media, category))
   const genres = [...new Set(categoryEntries.flatMap(({ media }) => media.genres))].sort()
   const years = [...new Set(categoryEntries.flatMap(({ media }) => media.year ?? []))].sort((a, b) => b - a)
   const visible = categoryEntries.filter((entry) => (
     matchesQuery(entry.media, query) &&
+    (!bookType || (entry.media.format === 'BOOK' && entry.media.bookType === bookType)) &&
     (!status || (status === 'Watchlist' ? isWatchlisted(entry) : entry.status === status)) &&
     (!genre || entry.media.genres.includes(genre)) &&
     (!year || String(entry.media.year) === year)
@@ -133,7 +134,8 @@ function LibraryTitles({ entries, category, defaultStatus, highlightId }: Omit<P
     setStatus('')
     setGenre('')
     setYear('')
-    setSort('recent')
+    setSort(defaultSort)
+    setBookType(undefined)
   }
 
   function clearFilters() {
@@ -156,12 +158,16 @@ function LibraryTitles({ entries, category, defaultStatus, highlightId }: Omit<P
           aria-label={active ? `Filter, ${active} active` : 'Filter'} title="Filter and sort"
         >
           <FunnelSimpleIcon size={iconSize.md} aria-hidden="true" />
-          {active ? <span className="filter-count" aria-hidden="true">{active}</span> : null}
+          <AnimatePresence initial={false}>
+            {active > 0 && <motion.span key={active} className="filter-count" aria-hidden="true" variants={crossfade}
+              initial={animate ? 'hidden' : false} animate="visible">{active}</motion.span>}
+          </AnimatePresence>
         </button>
       </header>
       <dialog ref={filterDialog} className="sheet" aria-labelledby="filter-heading" onCancel={(event) => { event.preventDefault(); setFiltering(false) }}>
         <div className="sheet-body">
           <SheetHeader id="filter-heading" title="Filter and sort" closeLabel="Close filters" onClose={() => setFiltering(false)} />
+          {category === 'Books' && <BookTypeFilter value={bookType} onChange={setBookType} />}
           <label className="field">Status
             <select className="control" value={status} onChange={(event) => setStatus(event.target.value)}>
               <option value="">All statuses</option>
@@ -206,7 +212,7 @@ function LibraryTitles({ entries, category, defaultStatus, highlightId }: Omit<P
           <motion.div className="empty-state" variants={rise} initial={animate ? 'hidden' : false} animate="visible">
             <BooksIcon size={iconSize.display} weight="light" aria-hidden="true" />
             <h2>{categoryEntries.length ? 'No matching titles' : `No ${label.toLowerCase()} yet`}</h2>
-            <p>{categoryEntries.length ? 'Try adjusting your search or filters.' : 'Log something you’ve watched or played to see it here.'}</p>
+            <p>{categoryEntries.length ? 'Try adjusting your search or filters.' : 'Log a title to see it here.'}</p>
             {categoryEntries.length
               ? <button type="button" className="button button-secondary" onClick={clearFilters}>Clear filters</button>
               : <Link className="button button-secondary" to="/search">Find a title</Link>}

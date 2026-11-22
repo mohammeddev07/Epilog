@@ -1,3 +1,4 @@
+import { bookTypes } from './books'
 // Library stats, computed only from what the library actually holds. Hours need a runtime; titles without
 // one are counted in `missingRuntime` instead of being guessed.
 import { isWatchlisted, localDate } from './media'
@@ -7,7 +8,7 @@ export const kinds = ['Movies', 'TV shows', 'Anime', 'Games'] as const
 export type Kind = (typeof kinds)[number]
 export type Ranked = readonly (readonly [string, number])[]
 
-export const kindOf = (media: Media): Kind =>
+const kindOf = (media: Exclude<Media, { format: 'BOOK' }>): Kind =>
   media.format === 'GAME' ? 'Games' : media.anime ? 'Anime' : media.format === 'MOVIE' ? 'Movies' : 'TV shows'
 export const isFinished = (entry: LibraryEntry) => entry.status === 'Completed' || entry.completions.length > 0
 const isSeen = (entry: LibraryEntry) => isFinished(entry) || entry.status === 'In progress'
@@ -53,6 +54,7 @@ export function libraryStats(entries: readonly LibraryEntry[], today = localDate
   const minutesByKind = Object.fromEntries(kinds.map((kind) => [kind, 0])) as Record<Kind, number>
   let missingRuntime = 0
   for (const entry of seen) {
+    if (entry.media.format === 'BOOK') continue
     const minutes = minutesSpent(entry)
     if (minutes === undefined) {
       if (entry.media.format !== 'GAME') missingRuntime++
@@ -67,7 +69,20 @@ export function libraryStats(entries: readonly LibraryEntry[], today = localDate
     sum + (media.format === 'MOVIE' && media.runtime ? media.runtime
       : media.format === 'SERIES' && media.runtime && (media.episodeTotal ?? media.episodes?.length) ? media.runtime * (media.episodeTotal ?? media.episodes?.length ?? 0) : 0), 0)
 
+  const books = entries.filter((entry) => entry.media.format === 'BOOK')
+  const units = { page: 0, chapter: 0, volume: 0 }
+  for (const { reading } of books) {
+    if (reading) units[reading.unit] += reading.count
+  }
+  const reading = {
+    units, titles: books.length, completed: books.filter(isFinished).length,
+    byType: bookTypes.map((type) => {
+      const titles = books.filter(({ media }) => media.format === 'BOOK' && media.bookType === type)
+      return { type, titles: titles.length, completed: titles.filter(isFinished).length }
+    }),
+  }
   return {
+    reading,
     finished: entries.filter(isFinished).length,
     watchMinutes: minutesByKind.Movies + minutesByKind['TV shows'] + minutesByKind.Anime,
     playMinutes: minutesByKind.Games,
@@ -76,7 +91,7 @@ export function libraryStats(entries: readonly LibraryEntry[], today = localDate
     episodes: seen.reduce((sum, entry) => sum + episodesSeen(entry), 0),
     longestStreakWeeks: longestRun(new Set(dates.map(week))),
     finishedThisYear: new Set(entries.filter((entry) => entry.completions.some(({ date }) => date.slice(0, 4) === today.slice(0, 4))).map((entry) => entry.media.id)).size,
-    rewatched: entries.filter((entry) => entry.completions.length > 1).length,
+    rewatched: entries.filter((entry) => entry.media.format !== 'BOOK' && entry.completions.length > 1).length,
     averageRating: rated.length ? rated.reduce((a, b) => a + b, 0) / rated.length : undefined,
     backlogMinutes,
     busiestMonth: rank(dates.map((date) => date.slice(0, 7)), 1)[0] as readonly [string, number] | undefined,

@@ -48,9 +48,9 @@ export function BrowseShelf({ category, query, entries, onLog, children }: {
         </Link>
       </div>
       {children}
-      <BrowseFeedback {...feed} />
       {items.length ? <PosterGrid items={items} entries={entries} shelf={heading} onLog={onLog} titleLink={(media) => browsePath(category, query, mediaKey(media))} /> : null}
       {(!active || feed.loading) && !items.length ? <CatalogSkeleton /> : null}
+      <BrowseFeedback {...feed} />
       {active && !feed.loading && !items.length ? (
         <motion.p className="muted discover-empty" variants={rise} initial={animate ? 'hidden' : false} animate="visible">
           {query.mode === 'release' ? 'No titles found for this period.' : 'No titles available.'}

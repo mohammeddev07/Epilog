@@ -170,5 +170,3 @@
   --press-scale: 0.96;
   --press-scale-subtle: 0.98;
 }
-:root[data-theme='light'] { color-scheme: light; }
-:root[data-theme='dark'] { color-scheme: dark; }

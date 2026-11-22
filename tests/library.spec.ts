@@ -135,7 +135,7 @@ test('lists Library sections that open filterable titles, and a stats page', asy
   await page.getByRole('link', { name: 'Library', exact: true }).click()
   const sections = page.getByRole('navigation', { name: 'Library sections' }).getByRole('link')
   // Whole rows are links: section, finished count, watchlist, saved total.
-  await expect(sections).toHaveText([/^Movies2 watched2$/, /^TV shows0 watched, 1 on watchlist1$/, /^Games0 played1$/, /^Anime0 watched0$/, /^Stats/])
+  await expect(sections).toHaveText([/^Movies2 watched2$/, /^TV shows0 watched, 1 on watchlist1$/, /^Games0 played1$/, /^Books0 read0$/, /^Anime0 watched0$/, /^Stats/])
 
   await sections.filter({ hasText: /^Movies/ }).click()
   await expect(page).toHaveURL(/\/library\?category=Movies$/)

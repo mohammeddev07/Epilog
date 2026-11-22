@@ -1,3 +1,5 @@
+import { bookTypes } from '../domain/books'
+import { titleLengthLimit } from '../domain/media'
 import { Dexie, liveQuery } from 'dexie'
 import type { Table } from 'dexie'
 import { buildBackup, planRestore } from '../domain/backup'
@@ -8,7 +10,7 @@ import { episodeKey, localDate, manualEpisode, updateEntry, updateEpisode, updat
 import type { Completion, Episode, LibraryEntry, LogDraft, Media, PreferenceChange, TitlePreferences } from '../domain/media'
 import { demoById } from './demo'
 
-type EntryRow = Pick<BackupEntry, 'status' | 'createdAt' | 'updatedAt' | 'playtimeMinutes'> & TitlePreferences & { mediaId: string }
+type EntryRow = Pick<BackupEntry, 'status' | 'createdAt' | 'updatedAt' | 'reading' | 'playtimeMinutes'> & TitlePreferences & { mediaId: string }
 type CompletionRow = Completion & { mediaId: string }
 type EpisodeRow = EpisodeActivity & { mediaId: string }
 type ResponseRow = { key: string; payload: CatalogPayload; writtenAt: number; expiresAt: number }
@@ -16,8 +18,8 @@ type ResponseRow = { key: string; payload: CatalogPayload; writtenAt: number; ex
 const responseCacheLimit = 64
 
 function trackingFields(row: EntryRow) {
-  const { status, createdAt, updatedAt, playtimeMinutes, liked, rating, watchlisted } = row
-  return { status, createdAt, updatedAt, playtimeMinutes, liked, rating, watchlisted }
+  const { status, createdAt, updatedAt, reading, playtimeMinutes, liked, rating, watchlisted } = row
+  return { status, createdAt, updatedAt, reading, playtimeMinutes, liked, rating, watchlisted }
 }
 
 type CatalogRow = { key: string; mediaId: string; media: Media; expiresAt: number }
@@ -55,6 +57,11 @@ function groupRows<T extends { mediaId: string }>(rows: T[]) {
 
 function displayMedia(owned: OwnedMedia, snapshot?: Media): Media {
   const display = snapshot ?? demoById.get(owned.id)
+  if (owned.format === 'BOOK' && owned.bookType) {
+    return { ...display, id: owned.id, format: 'BOOK', anime: undefined, bookType: owned.bookType,
+      title: owned.label ?? display?.title ?? 'Saved book', description: display?.description ?? '',
+      genres: display?.genres ?? [], identity: parseCatalogKey(owned.id) }
+  }
   if (display && display.format === owned.format && Boolean(display.anime) === owned.anime) {
     return { ...display, id: owned.id }
   }
@@ -64,6 +71,7 @@ function displayMedia(owned: OwnedMedia, snapshot?: Media): Media {
     description: '',
     genres: [],
   }
+  if (owned.format === 'BOOK') throw new Error('This book is missing its type.')
   return owned.format === 'GAME' ? { ...base, format: owned.format } : { ...base, format: owned.format, anime: owned.anime }
 }
 
@@ -83,6 +91,7 @@ function libraryEntry(entry: BackupEntry, snapshot?: Media): LibraryEntry {
     rating: entry.rating,
     watchlisted: entry.watchlisted,
     label: entry.media.label,
+    reading: entry.reading,
     playtimeMinutes: entry.playtimeMinutes,
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
@@ -158,19 +167,24 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
       const existingLink = key ? await db.catalog.get(key) : undefined
       const existing = await db.media.get(media.id)
       const id = existing?.id ?? (existingLink && existingLink.expiresAt > now ? existingLink.mediaId : undefined) ??
-        (key ? crypto.randomUUID() : media.id)
+        (key && media.format !== 'BOOK' ? crypto.randomUUID() : media.id)
       const owned = existing ?? await db.media.get(id) ?? { id, format: media.format, anime: Boolean(media.anime) }
       const stored = await storedEntry(id, owned)
       const updatedAt = Math.max(now, stored?.updatedAt ?? 0)
       const current = stored ? libraryEntry(stored, media) : undefined
       const entry = update(current, updatedAt)
       if (entry === current) return { id, created: false, changed: false }
-      await db.media.put({ id, format: owned.format, anime: owned.anime, label: entry.label })
+      if (entry.media.format === 'BOOK' && (!entry.media.title.trim() || entry.media.title.length > titleLengthLimit || !bookTypes.includes(entry.media.bookType))) {
+        throw new Error('Enter a valid book title and choose a book type.')
+      }
+      const book = entry.media.format === 'BOOK' ? { bookType: entry.media.bookType, label: entry.media.title } : {}
+      await db.media.put({ id, format: owned.format, anime: owned.anime, label: entry.label, ...book })
       await db.entries.put({
         mediaId: id,
         status: entry.status,
         createdAt: stored?.createdAt ?? now,
         updatedAt,
+        reading: entry.reading,
         playtimeMinutes: entry.playtimeMinutes,
         liked: entry.liked,
         rating: entry.rating,
@@ -202,7 +216,7 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
 
   function completeToday(media: Media) {
     const completion = { id: crypto.randomUUID(), date: localDate(new Date(clock())) }
-    return writeEntry(media, (current, now) => current?.status === 'Completed' ? current : updateEntry(media, current, {
+    return writeEntry(media, (current, now) => current?.status === 'Completed' ? current : updateEntry(current?.media ?? media, current, {
       status: 'Completed', completion, playtimeMinutes: current?.playtimeMinutes,
     }, now))
   }
@@ -262,6 +276,7 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
           status: item.status,
           createdAt: item.createdAt,
           updatedAt: item.updatedAt,
+          reading: item.reading,
           playtimeMinutes: item.playtimeMinutes,
           liked: item.liked,
           rating: item.rating,

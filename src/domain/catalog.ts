@@ -1,10 +1,11 @@
+import type { BookType } from './books'
 import { catalogKey } from './identity'
 import type { CatalogIdentity } from './identity'
 import type { Media } from './media'
 
-export const providerNames = ['tmdb', 'igdb'] as const
+export const providerNames = ['tmdb', 'igdb', 'openlibrary'] as const
 export type Provider = (typeof providerNames)[number]
-export const discoverSections = ['Movies', 'TV Shows', 'Anime', 'Games'] as const
+export const discoverSections = ['Movies', 'TV Shows', 'Books', 'Anime', 'Games'] as const
 export type DiscoverSection = (typeof discoverSections)[number]
 
 export const sectionPaths = {
@@ -12,6 +13,7 @@ export const sectionPaths = {
   'TV Shows': 'tv',
   Anime: 'anime',
   Games: 'games',
+  Books: 'books',
 } as const
 
 export const queryLimit = 120
@@ -37,7 +39,7 @@ export interface ReleasePeriod {
 }
 
 export type DiscoverQuery = { mode: 'rated' } | { mode: 'anticipated' } | { mode: 'release'; period: ReleasePeriod }
-export type BrowseQuery = DiscoverQuery | { mode: 'popular' }
+export type BrowseQuery = (DiscoverQuery | { mode: 'popular' }) & { bookType?: BookType }
 export const defaultReleasePeriod: ReleasePeriod = { decade: releaseDecades[0] }
 const yearsPerDecade = 10
 
@@ -61,6 +63,7 @@ export function browseCatalogPath(category: DiscoverSection, query: BrowseQuery,
     params.set('decade', String(query.period.decade))
     if (query.period.year !== undefined) params.set('year', String(query.period.year))
   }
+  if (category === 'Books' && query.bookType) params.set('type', query.bookType)
   if (page > 1) params.set('page', String(page))
   return params.size ? `${pathname}?${params}` : pathname
 }
@@ -89,6 +92,7 @@ export function interleave<T>(groups: readonly (readonly T[])[]) {
 }
 
 export function providerDisplayName(provider: CatalogIdentity['provider']) {
+  if (provider === 'openlibrary') return 'Open Library'
   return provider === 'tmdb' ? 'TMDB' : 'IGDB'
 }
 

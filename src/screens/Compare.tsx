@@ -1,6 +1,6 @@
 import { PaperPlaneTiltIcon } from '@phosphor-icons/react'
 import { useEffect, useRef, useState } from 'react'
-import { Link, useLocation } from 'react-router'
+import { Link } from 'react-router'
 import type { LibraryEntry } from '../domain/media'
 import { compare, decodeProfile, itemMedia } from '../domain/share'
 import type { Profile } from '../domain/share'
@@ -12,8 +12,8 @@ import { iconSize } from '../ui/tokens'
 
 type Decoded = { payload: string; profile?: Profile; error?: string }
 
-export function Compare({ entries, onLog }: { entries: ReadonlyMap<string, LibraryEntry>; onLog: OpenLog }) {
-  const payload = new URLSearchParams(useLocation().hash.slice(1)).get('p') ?? ''
+export function Compare({ entries, onLog, hash }: { hash?: string; entries: ReadonlyMap<string, LibraryEntry>; onLog: OpenLog }) {
+  const payload = new URLSearchParams(hash).get('p') ?? ''
   const [decoded, setDecoded] = useState<Decoded>()
   const [sharing, setSharing] = useState(false)
   const sendBack = useRef<HTMLButtonElement>(null)
@@ -55,7 +55,7 @@ export function Compare({ entries, onLog }: { entries: ReadonlyMap<string, Libra
       <header className="page-intro">
         <div>
           <h1 tabIndex={-1}>{title}</h1>
-          <p>{profile.i.length} {profile.i.length === 1 ? 'title' : 'titles'} watched or played.</p>
+          <p>{profile.i.length} {profile.i.length === 1 ? 'title' : 'titles'} in this shared library.</p>
         </div>
         <button type="button" className="button button-primary" ref={sendBack} onClick={() => setSharing(true)}>
           <PaperPlaneTiltIcon size={iconSize.md} aria-hidden="true" /> Send yours back

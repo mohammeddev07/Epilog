@@ -4,6 +4,7 @@ import { useLayoutEffect, useRef } from 'react'
 import type { PointerEvent } from 'react'
 import { mediaKey } from '../domain/catalog'
 import type { Media } from '../domain/media'
+import { useOpenDetail } from './detail-navigation'
 import { Poster } from './MediaCards'
 import { carouselSpring, useMotionEnabled } from './motion'
 
@@ -20,6 +21,7 @@ interface Gesture {
   y: number
   width: number
   offset: number
+  moved: boolean
   slot: number // cover the press started on: 0 current, ±1 neighbours
 }
 
@@ -47,12 +49,16 @@ function Cover({ media, position, offset, slot }: { media: Media; position: numb
   )
 }
 
-export function SwipePosters({ items, index, onStep }: {
+export function SwipePosters({ items, index, onStep, detailId }: {
   items: readonly Media[]
+  detailId: string
   index: number
   onStep: (direction: -1 | 1) => boolean
 }) {
   const motionEnabled = useMotionEnabled()
+  const openDetail = useOpenDetail()
+  const posterId = popularPosterId(items[index])
+  const stageId = posterId + '-stage'
   const offset = useMotionValue(-index * slideWidth)
   const transform = useMotionTemplate`${offset}%`
   const previousIndex = useRef(index)
@@ -76,7 +82,7 @@ export function SwipePosters({ items, index, onStep }: {
     offset.stop()
     gesture.current = {
       id: event.pointerId, x: event.clientX, y: event.clientY,
-      width: event.currentTarget.clientWidth, offset: offset.get(),
+      moved: false, width: event.currentTarget.clientWidth, offset: offset.get(),
       slot: Number((event.target as Element).closest('[data-slot]')?.getAttribute('data-slot') ?? 0),
     }
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -84,7 +90,9 @@ export function SwipePosters({ items, index, onStep }: {
 
   function drag(event: PointerEvent<HTMLDivElement>) {
     const start = gesture.current
-    if (!motionEnabled || !start || start.id !== event.pointerId || !start.width) return
+    if (!start || start.id !== event.pointerId || !start.width) return
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) >= 6) start.moved = true
+    if (!motionEnabled) return
     const dx = event.clientX - start.x
     if (Math.abs(dx) <= Math.abs(event.clientY - start.y)) return
     const percent = Math.min(slideWidth, Math.max(-slideWidth, dx * slideWidth / start.width))
@@ -105,17 +113,26 @@ export function SwipePosters({ items, index, onStep }: {
     const dx = event.clientX - start.x
     const sideways = Math.abs(dx) >= swipeDistance && Math.abs(dx) > Math.abs(event.clientY - start.y)
     if (sideways && onStep(dx > 0 ? -1 : 1)) return
-    // A tap on a peeking neighbour steps to it.
-    if (Math.abs(dx) < 6 && start.slot && onStep(start.slot > 0 ? 1 : -1)) return
+    if (!start.moved && Math.hypot(dx, event.clientY - start.y) < 6) {
+      if (start.slot === 0) openDetail(detailId, stageId, posterId)
+      else if (onStep(start.slot > 0 ? 1 : -1)) return
+    }
+    settle()
+  }
+
+  function interrupt() {
+    if (!gesture.current) return
+    gesture.current = undefined
     settle()
   }
 
   return (
-    <div
-      className="popular-stage" role="group" tabIndex={0} aria-label="Poster. Swipe or use the left and right arrow keys to browse."
+    <div id={stageId}
+      className="popular-stage" role="group" tabIndex={0} aria-label="Poster. Swipe or use the left and right arrow keys to browse. Press Enter to open details."
       onPointerDown={start} onPointerMove={drag} onPointerUp={end}
-      onPointerCancel={() => { gesture.current = undefined; settle() }}
+      onPointerCancel={interrupt} onLostPointerCapture={interrupt} onBlur={interrupt}
       onKeyDown={(event) => {
+        if (event.key === 'Enter' && !event.repeat) openDetail(detailId, stageId, posterId)
         if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
         event.preventDefault()
         onStep(event.key === 'ArrowLeft' ? -1 : 1)

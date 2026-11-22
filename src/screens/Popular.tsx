@@ -94,7 +94,7 @@ function PopularCarousel({ browse, category, title, entries, onLog, onComplete, 
             <p>{[media.year, formatLabel(media)].filter(Boolean).join(' · ')}</p>
           </motion.div>
           <span className="sr-only" aria-live="polite" aria-atomic="true">{media.title}, title {index + 1}</span>
-          <SwipePosters items={items} index={index} onStep={step} />
+          <SwipePosters detailId={entry?.media.id ?? media.id} items={items} index={index} onStep={step} />
           <PopularActions
             key={key} media={media} entry={entry} onLog={onLog} onComplete={onComplete} onPreference={onPreference}
             onInteract={() => setSelection({ key, waiting: false, direction: 0 })}

@@ -14,7 +14,7 @@ export function useModal(open: boolean, trigger?: HTMLElement | RefObject<HTMLEl
     if (!open && element.open) {
       element.close()
       const target = trigger && 'current' in trigger ? trigger.current : trigger
-      target?.focus({ preventScroll: true })
+      if (target?.isConnected && !target.closest('[hidden], [inert]')) target.focus({ preventScroll: true })
     }
   }, [open, trigger, initialFocus])
 
