@@ -166,7 +166,10 @@ function libraryEntry(entry: BackupEntry, snapshot?: Media): LibraryEntry {
   }
 }
 
-export function createLibrary(name = 'epilog', clock = Date.now) {
+/** Window event the app's library fires after a write that queued a change for sync. */
+export const libraryChanged = 'epilog:library-changed'
+
+export function createLibrary(name = 'epilog', clock = Date.now, changed: () => void = () => {}) {
   const db = new LibraryDatabase(name)
   const records = [db.media, db.entries, db.completions, db.episodes]
   const tables = [...records, db.catalog, db.outbox, db.meta]
@@ -179,6 +182,7 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
   async function enqueue(keys: OutboxKey[], at: number) {
     if (!keys.length || !await db.meta.get('account')) return 0
     await db.outbox.bulkPut(keys.map((key) => ({ ...key, at })))
+    changed()
     return keys.length
   }
 
@@ -587,18 +591,31 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
     })
   }
 
+  async function localKeys(): Promise<OutboxKey[]> {
+    const [entryIds, completionIds, episodeKeys] = await Promise.all([
+      db.entries.toCollection().primaryKeys(), db.completions.toCollection().primaryKeys(), db.episodes.toCollection().primaryKeys(),
+    ])
+    return [
+      ...entryIds.map((id) => ({ kind: 'entry' as const, id })),
+      ...completionIds.map((id) => ({ kind: 'completion' as const, id })),
+      ...episodeKeys.map(([mediaId, season, number]) => ({ kind: 'episode' as const, id: episodeId(mediaId, { season, number }) })),
+    ]
+  }
+
+  /** Replaces synced state with the server's full set. Records still queued stay, and are pushed next. */
+  async function resetRemote(changes: readonly SyncChange[], remap: Readonly<Record<string, string>>) {
+    await db.transaction('rw', tables, async () => {
+      const keep = new Set([...changes, ...await db.outbox.toArray()].map(({ kind, id }) => `${kind} ${id}`))
+      for (const key of await localKeys()) {
+        if (!keep.has(`${key.kind} ${key.id}`)) await writeChange({ ...key, data: null, at: 0 })
+      }
+      await applyRemote(changes, remap)
+    })
+  }
+
   /** Queues every local record, for the first merge into an account. */
   async function enqueueAll() {
-    return db.transaction('rw', tables, async () => {
-      const [entryIds, completionIds, episodeKeys] = await Promise.all([
-        db.entries.toCollection().primaryKeys(), db.completions.toCollection().primaryKeys(), db.episodes.toCollection().primaryKeys(),
-      ])
-      return enqueue([
-        ...entryIds.map((id) => ({ kind: 'entry' as const, id })),
-        ...completionIds.map((id) => ({ kind: 'completion' as const, id })),
-        ...episodeKeys.map(([mediaId, season, number]) => ({ kind: 'episode' as const, id: episodeId(mediaId, { season, number }) })),
-      ], clock())
-    })
+    return db.transaction('rw', tables, async () => enqueue(await localKeys(), clock()))
   }
 
   async function saveMergeSnapshot() {
@@ -639,7 +656,7 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
   return {
     read, watch, save, completeToday, uncomplete, savePreference, setEpisode, remove, exportBackup, previewRestore, applyRestore,
     purgeExpired, refreshSnapshot, readResponse, cacheResponse,
-    account, setAccount, lastSub, setCursor, pendingChanges, acknowledge, applyRemote, enqueueAll,
+    account, setAccount, lastSub, setCursor, pendingChanges, acknowledge, applyRemote, resetRemote, enqueueAll,
     saveMergeSnapshot, mergeSnapshot, clearAll, storeSnapshot, missingSnapshots,
     close: () => db.close(),
     deleteDatabase: () => db.delete(),
@@ -647,4 +664,4 @@ export function createLibrary(name = 'epilog', clock = Date.now) {
 }
 
 export type LibraryStore = ReturnType<typeof createLibrary>
-export const library = createLibrary()
+export const library = createLibrary('epilog', Date.now, () => window.dispatchEvent(new Event(libraryChanged)))

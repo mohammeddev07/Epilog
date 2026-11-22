@@ -10,6 +10,7 @@ import { useCatalogDetail, useConnection, demoMode, useSnapshotHydration, warmCa
 import { statuses } from './domain/media'
 import { library } from './data/library'
 import { useLibrary } from './data/useLibrary'
+import { sync } from './data/sync'
 import type { Episode, LibraryEntry, LogDraft, Media, PreferenceChange, Status } from './domain/media'
 import { Compare } from './screens/Compare'
 import { Dashboard } from './screens/Dashboard'
@@ -159,6 +160,8 @@ function Application() {
       setStorageError(true)
     }
   }
+
+  useEffect(() => sync.start(), [])
 
   useEffect(() => {
     // Let the visible screen load first, then refresh the shelves people open next.

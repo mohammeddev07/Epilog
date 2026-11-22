@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { Dexie } from 'dexie'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseBackup } from '../domain/backup-file'
 import { episodeWatchState, isWatchlisted, manualEpisode } from '../domain/media'
 import type { Media } from '../domain/media'
@@ -16,8 +16,8 @@ const catalogFilm: Media = { ...film, id: 'tmdb:movie:1', identity: { provider: 
 const account = { sub: 's1', email: 'a@example.test', name: 'A' }
 const databases: LibraryStore[] = []
 
-function open(name = crypto.randomUUID(), clock?: () => number) {
-  const store = createLibrary(name, clock)
+function open(name = crypto.randomUUID(), clock?: () => number, changed?: () => void) {
+  const store = createLibrary(name, clock, changed)
   databases.push(store)
   return store
 }
@@ -402,6 +402,37 @@ describe('IndexedDB library', () => {
     expect(changes.map(({ kind, id }) => `${kind} ${id}`).sort()).toEqual(
       ['completion c1', `entry ${anime.id}`, `entry ${film.id}`, `episode ${anime.id}:1:2`])
     expect(changes.find(({ kind }) => kind === 'episode')?.data).toEqual({ mediaId: anime.id, season: 1, number: 2, watched: true })
+  })
+
+  it('notifies changed only for writes that queue a change', async () => {
+    const changed = vi.fn()
+    const store = open(undefined, undefined, changed)
+    await store.savePreference(film, { kind: 'like', value: true })
+    expect(changed).not.toHaveBeenCalled()
+    await store.setAccount(account)
+    await store.savePreference(film, { kind: 'rating', value: 4 })
+    expect(changed).toHaveBeenCalledTimes(1)
+  })
+
+  it('resetRemote replaces synced records with the server set and keeps queued ones', async () => {
+    const store = open()
+    await store.setAccount(account)
+    await store.save(film, { status: 'Completed', completion: { id: 'c1', date: '2026-11-18' } })
+    await store.save(anime, { status: 'Planned' })
+    await store.setEpisode(anime.id, manualEpisode({ season: 1, number: 2 }), true)
+    await store.acknowledge(await store.pendingChanges(500))
+    await store.savePreference(game, { kind: 'like', value: true })
+    const queued = await store.pendingChanges(500)
+    const groups = { progress: { status: 'Planned' as const, at: 1000 }, liked: { at: 0 }, rating: { at: 0 }, watchlisted: { at: 0 }, label: { at: 0 } }
+    await store.resetRemote([
+      { kind: 'entry', id: 'm-remote', data: { format: 'MOVIE', anime: false, createdAt: 900, groups }, at: 1000 },
+      { kind: 'entry', id: anime.id, data: { format: 'SERIES', anime: true, createdAt: 900, groups }, at: 1000 },
+    ], {})
+    const entries = await store.read()
+    expect([...entries.keys()].sort()).toEqual([anime.id, game.id, 'm-remote'].sort())
+    expect(entries.get(anime.id)?.watched).toEqual([])
+    expect((await store.exportBackup()).entries.flatMap(({ completions }) => completions)).toEqual([])
+    expect(await store.pendingChanges(500)).toEqual(queued)
   })
 
   it('keeps a merge snapshot and clears everything but cached responses', async () => {
