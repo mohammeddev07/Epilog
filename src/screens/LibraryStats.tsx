@@ -6,6 +6,7 @@ import type { CatalogIdentity } from '../domain/identity'
 import type { LibraryEntry } from '../domain/media'
 import { isFinished, kinds, libraryStats } from '../domain/stats'
 import type { Ranked } from '../domain/stats'
+import { bookTypeLabels } from '../domain/books'
 import { iconSize } from '../ui/tokens'
 
 const count = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 })
@@ -41,7 +42,7 @@ function Bars({ title, rows, format = count.format }: { title: string; rows: Ran
 export function LibraryStats({ entries }: { entries: readonly LibraryEntry[] }) {
   const stats = libraryStats(entries)
   const hours = (minutes: number) => `${formatHours(minutes)} hr`
-  const untimed = entries.filter((entry) => entry.media.format !== 'GAME' && !entry.media.runtime && entry.media.identity &&
+  const untimed = entries.filter((entry) => entry.media.format !== 'GAME' && entry.media.format !== 'BOOK' && !entry.media.runtime && entry.media.identity &&
     (isFinished(entry) || entry.status === 'In progress')).map((entry) => entry.media.identity as CatalogIdentity)
   const { working } = useRuntimeBackfill(untimed)
   const totalMinutes = stats.watchMinutes + stats.playMinutes
@@ -67,7 +68,7 @@ export function LibraryStats({ entries }: { entries: readonly LibraryEntry[] }) 
         <div>
           <Link className="text-action back-link" to="/library"><ArrowLeftIcon size={iconSize.sm} aria-hidden="true" /> Library</Link>
           <h1 tabIndex={-1}>Stats</h1>
-          <p>Everything you’ve watched and played, in numbers.</p>
+          <p>Your viewing, playing, and reading totals.</p>
         </div>
       </header>
       {entries.length ? (
@@ -75,6 +76,21 @@ export function LibraryStats({ entries }: { entries: readonly LibraryEntry[] }) 
           <dl className="figures">
             {figures.map(([value, label]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
           </dl>
+          {stats.reading.titles > 0 && <section className="shelf reading-stats" aria-labelledby="reading-stats">
+            <h2 id="reading-stats">Reading</h2>
+            <dl className="figures">
+              <div><dt>Pages read</dt><dd>{count.format(stats.reading.units.page)}</dd></div>
+              <div><dt>Chapters read</dt><dd>{count.format(stats.reading.units.chapter)}</dd></div>
+              <div><dt>Volumes read</dt><dd>{count.format(stats.reading.units.volume)}</dd></div>
+              <div><dt>Books completed</dt><dd>{count.format(stats.reading.completed)}</dd></div>
+            </dl>
+            <table><caption>Books by type</caption>
+              <thead><tr><th scope="col">Book type</th><th scope="col">In library</th><th scope="col">Completed</th></tr></thead>
+              <tbody>{stats.reading.byType.map((row) => <tr key={row.type}>
+                <th scope="row">{bookTypeLabels[row.type]}</th><td>{row.titles}</td><td>{row.completed}</td>
+              </tr>)}</tbody>
+            </table>
+          </section>}
           {stats.missingRuntime ? (
             <p className="muted stats-note" role="status">
               {working

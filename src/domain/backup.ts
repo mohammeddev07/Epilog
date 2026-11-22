@@ -1,14 +1,17 @@
+import { readingText } from './books'
+import type { BookType, ReadingProgress } from './books'
 import { episodeKey, localDate } from './media'
 import type { Completion, EpisodePosition, Media, Status, TitlePreferences } from './media'
 
 export const backupFormat = 'epilog-library'
-export const backupVersion = 2
+export const backupVersion = 3
 export const backupSizeLimit = 10 * 1024 * 1024
 
 export interface OwnedMedia {
   id: string
   format: Media['format']
   anime: boolean
+  bookType?: BookType
   label?: string
 }
 
@@ -22,6 +25,7 @@ export interface BackupEntry extends TitlePreferences {
   status?: Status
   createdAt: number
   updatedAt: number
+  reading?: ReadingProgress
   playtimeMinutes?: number
   completions: Completion[]
   episodes: EpisodeActivity[]
@@ -29,7 +33,7 @@ export interface BackupEntry extends TitlePreferences {
 
 export interface Backup {
   format: typeof backupFormat
-  version: 1 | typeof backupVersion
+  version: 1 | 2 | typeof backupVersion
   entries: BackupEntry[]
 }
 
@@ -94,6 +98,14 @@ export function planRestore(backup: Backup, current: BackupEntry[], preferBackup
     const status = choose('Status', saved.status, incoming.status)
     const label = choose('Backup label', saved.media.label, incoming.media.label)
     const playtimeMinutes = choose('Minutes played', saved.playtimeMinutes, incoming.playtimeMinutes)
+    const bookType = choose('Book type', saved.media.bookType, incoming.media.bookType)
+    let reading = saved.reading
+    if (saved.media.format === 'BOOK' && (reading?.unit !== incoming.reading?.unit ||
+      reading?.count !== incoming.reading?.count || reading?.total !== incoming.reading?.total)) {
+      conflicts.push({ media: owned, field: 'Reading progress', current: reading ? readingText(reading) : 'Empty',
+        incoming: incoming.reading ? readingText(incoming.reading) : 'Empty' })
+      if (preferBackup) { reading = incoming.reading; changed = true }
+    }
     const liked = backup.version === 1 ? saved.liked : choose('Like', saved.liked, incoming.liked)
     const rating = backup.version === 1 ? saved.rating : choose('Rating', saved.rating, incoming.rating)
     const watchlisted = backup.version === 1 ? saved.watchlisted : choose('Watchlist', saved.watchlisted, incoming.watchlisted)
@@ -119,7 +131,8 @@ export function planRestore(backup: Backup, current: BackupEntry[], preferBackup
     if (!changed) return []
     return [{
       ...saved,
-      media: { ...saved.media, label },
+      media: { ...saved.media, label, bookType },
+      reading,
       status,
       playtimeMinutes,
       liked,

@@ -82,7 +82,7 @@ test('ignores superseded searches and keeps a distinct game in the unified resul
   await expect(page.getByRole('link', { name: /Obsolete result/ })).toHaveCount(0)
 })
 
-test('shows four Discover categories and preserves saved identities across them', async ({ page }) => {
+test('shows all Discover categories and preserves saved identities across them', async ({ page }) => {
   const requested: string[] = []
   await page.route('**/api/catalog/popular/*', async (route) => {
     const suffix = new URL(route.request().url()).pathname.split('/').at(-1)!
@@ -98,10 +98,10 @@ test('shows four Discover categories and preserves saved identities across them'
   const shelf = page.getByRole('list', { name: 'Popular This Week', exact: true })
   await expect(shelf.getByRole('link', { name: /Moon Lantern/ })).toHaveCount(1)
   const categories = page.getByRole('group', { name: 'Popular This Week categories' })
-  const options = ['Movies', 'TV Shows', 'Anime', 'Games']
+  const options = ['Movies', 'TV Shows', 'Books', 'Anime', 'Games']
   await expect(categories.getByRole('button')).toHaveText(options)
   await expect(categories.getByRole('button', { name: 'Movies' })).toHaveAttribute('aria-pressed', 'true')
-  expect(requested).toEqual(['movies'])
+  expect(requested[0]).toBe('movies') // the visible category loads first; the startup warm-up follows
   await categories.getByRole('button', { name: 'Games' }).click()
   await expect(page.getByRole('region', { name: 'Popular This Week', exact: true }).getByText('Games catalog is unavailable. Try again.')).toBeVisible()
   await categories.getByRole('button', { name: 'Anime' }).click()

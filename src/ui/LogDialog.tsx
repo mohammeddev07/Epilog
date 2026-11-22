@@ -1,3 +1,4 @@
+import { BookFields, bookFields } from './BookFields'
 import { motion } from 'motion/react'
 import { useRef, useState } from 'react'
 import type { FormEvent } from 'react'
@@ -10,6 +11,7 @@ import { SheetHeader } from './Sheet'
 
 export interface LogSession {
   key: number
+  locationKey: string
   media: Media
   trigger: HTMLElement
   initialStatus?: Status
@@ -24,7 +26,7 @@ interface Props {
 }
 
 export function LogDialog({ session, open, entry, onClose, onSave }: Props) {
-  const dialog = useModal(open, session?.trigger, 'input:checked')
+  const dialog = useModal(open, session?.trigger, session?.media.format === 'BOOK' ? '.book-fields input' : 'input:checked')
   const [busy, setBusy] = useState(false)
 
   return (
@@ -64,9 +66,13 @@ interface FormProps {
 }
 
 function LogForm({ media, initialStatus, entry, busy, setBusy, onClose, onSave }: FormProps) {
-  const [status, setStatus] = useState<Status>(initialStatus ?? entry?.status ?? 'Planned')
+  const [status, setStatus] = useState<Status>(initialStatus ?? entry?.status ?? (media.format === 'BOOK' ? 'In progress' : 'Planned'))
   const [date, setDate] = useState(localDate)
   const [another, setAnother] = useState(false)
+  const [book, setBook] = useState(() => {
+    const saved = entry?.media ?? media
+    return saved.format === 'BOOK' ? bookFields(saved, entry?.reading) : undefined
+  })
   const [hours, setHours] = useState(entry?.playtimeMinutes === undefined ? '' : String(entry.playtimeMinutes / 60))
   const [error, setError] = useState('')
   const [label, setLabel] = useState(entry?.label ?? '')
@@ -87,7 +93,13 @@ function LogForm({ media, initialStatus, entry, busy, setBusy, onClose, onSave }
       if (needsDate && completion.current?.date !== date) {
         completion.current = { date, id: crypto.randomUUID() }
       }
-      await onSave(media, {
+      if (book && !book.title.trim()) throw new Error('Enter a book title.')
+      if (book && entry?.reading?.count && book.unit !== entry.reading.unit && !book.count.trim()) {
+        throw new Error(`Enter your progress in ${book.unit}s to change the tracking unit.`)
+      }
+      const title = media.format === 'BOOK' && book ? { ...media, title: book.title.trim(), bookType: book.type } : media
+      await onSave(title, {
+        reading: book ? { unit: book.unit, count: Number(book.count), total: book.total ? Number(book.total) : undefined } : undefined,
         status,
         completion: needsDate ? completion.current : undefined,
         label: media.identity || entry?.label || media.title === 'Saved title' ? label : undefined,
@@ -105,10 +117,10 @@ function LogForm({ media, initialStatus, entry, busy, setBusy, onClose, onSave }
   return (
     <form onSubmit={submit} className="sheet-body" noValidate aria-busy={busy}>
       <SheetHeader id="log-heading" title={entry ? 'Edit library entry' : 'Log a title'} closeLabel="Close log editor" onClose={onClose} disabled={busy} />
-      <div className="log-summary">
+      {book ? <BookFields fields={book} onChange={setBook} disabled={busy} /> : <div className="log-summary">
         <Poster media={media} />
         <div><strong>{media.title}</strong><span className="muted">{formatLabel(media)}{media.year ? ` · ${media.year}` : ''}</span></div>
-      </div>
+      </div>}
       <fieldset disabled={busy} className="status-options">
         <legend>Status</legend>
         <div>
@@ -143,16 +155,14 @@ function LogForm({ media, initialStatus, entry, busy, setBusy, onClose, onSave }
           <input type="number" min="0" step="any" inputMode="decimal" placeholder="e.g. 12.5" value={hours} onChange={(event) => setHours(event.target.value)} disabled={busy} />
         </label>
       ) : null}
-      {media.identity || entry?.label || media.title === 'Saved title' ? (
+      {!book && (media.identity || entry?.label || media.title === 'Saved title') ? (
         <label className="field">
           Title for backups <span className="muted">(optional)</span>
           <input type="text" maxLength={titleLengthLimit} value={label} onChange={(event) => setLabel(event.target.value)} disabled={busy} />
         </label>
       ) : null}
       {error ? (
-        <motion.p className="form-error" role="alert" initial={animate ? 'hidden' : false} animate="visible" variants={rise}>
-          {error}
-        </motion.p>
+        <p className="form-error" role="alert">{error}</p>
       ) : null}
       <div className="sheet-actions">
         <button type="button" className="button button-secondary" onClick={onClose} disabled={busy}>Cancel</button>

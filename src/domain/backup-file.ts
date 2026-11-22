@@ -1,3 +1,4 @@
+import { bookTypes, readingUnits } from './books'
 import { z } from 'zod'
 import { backupFormat, backupSizeLimit, backupVersion } from './backup'
 import type { Backup } from './backup'
@@ -41,16 +42,27 @@ const legacyBackupSchema = z.strictObject({
   entries: z.array(entrySchema),
 })
 
-const backupSchema = z.union([legacyBackupSchema, z.strictObject({
-  format: z.literal(backupFormat),
-  version: z.literal(backupVersion),
-  entries: z.array(entrySchema.extend({
-    status: z.enum(statuses).optional(),
-    liked: z.boolean().optional(),
-    rating: z.literal(ratings).optional(),
-    watchlisted: z.boolean().optional(),
-  })),
-})])
+const preferenceEntry = entrySchema.extend({
+  status: z.enum(statuses).optional(),
+  liked: z.boolean().optional(),
+  rating: z.literal(ratings).optional(),
+  watchlisted: z.boolean().optional(),
+})
+const bookMedia = mediaSchema.extend({
+  id: z.union([safeIdentifier, z.string().regex(/^openlibrary:work:OL[1-9]\d{0,11}W$/)]),
+  format: z.literal('BOOK'), anime: z.literal(false),
+  label: z.string().trim().min(1).max(titleLengthLimit),
+  bookType: z.enum(bookTypes),
+})
+const readingSchema = z.strictObject({
+  unit: z.enum(readingUnits), count: z.int().nonnegative(), total: z.int().positive().optional(),
+}).refine(({ count, total }) => total === undefined || count <= total)
+const backupSchema = z.discriminatedUnion('version', [legacyBackupSchema,
+  z.strictObject({ format: z.literal(backupFormat), version: z.literal(2), entries: z.array(preferenceEntry) }),
+  z.strictObject({ format: z.literal(backupFormat), version: z.literal(backupVersion), entries: z.array(
+    z.union([preferenceEntry, preferenceEntry.extend({ media: bookMedia, reading: readingSchema.optional() })])
+  ) }),
+])
 
 export function parseBackup(text: string): Backup {
   if (new TextEncoder().encode(text).length > backupSizeLimit) throw new Error('The backup exceeds 10 MB.')

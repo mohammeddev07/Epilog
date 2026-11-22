@@ -20,6 +20,52 @@ function search(provider: string, query: string, options?: RequestInit) {
 }
 
 describe('catalog Worker', () => {
+  it('searches and browses Open Library books by type, and rejects unknown types', async () => {
+    const urls: URL[] = []
+    const upstream = vi.fn<typeof fetch>(async (input) => {
+      urls.push(new URL(String(input)))
+      return Response.json({ numFound: 2, docs: [
+        { key: '/works/OL1W', title: 'Tower Diaries', subject: ['Manhwa', 'Fantasy'], cover_i: 9, author_name: ['Kim'] },
+        { key: '/works/OL2W', title: 'Plain Novel', subject: ['Fiction'] },
+      ] })
+    })
+    const worker = createCatalogWorker(upstream)
+    const found = await worker.fetch(new Request(`${origin}/api/catalog/search/openlibrary?type=Manhwa`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: 'Tower' }),
+    }), env)
+    expect(await found.json()).toEqual({ hasMore: false, items: [expect.objectContaining({
+      id: 'openlibrary:work:OL1W', format: 'BOOK', bookType: 'Manhwa', poster: 'https://covers.openlibrary.org/b/id/9-L.jpg?default=false',
+    })] })
+    expect(urls[0].searchParams.get('q')).toBe('subject:(manhwa) AND title:("Tower")')
+    const shelf = await (await worker.fetch(new Request(`${origin}/api/catalog/popular/books`), env)).json()
+    expect(shelf.items.map((item: { bookType: string }) => item.bookType)).toEqual(['Manhwa', 'Novel'])
+    expect(urls[1].searchParams.get('sort')).toBe('trending')
+    expect(urls[1].searchParams.get('q')).toMatch(/^subject:\(.+\) AND cover_i:\[1 TO \*\]$/)
+    expect((await worker.fetch(new Request(`${origin}/api/catalog/popular/books?type=Comics`), env)).status).toBe(400)
+    expect(upstream).toHaveBeenCalledTimes(2)
+
+    // Nonfiction is tagged by topic, so a title search isn't narrowed by subject.
+    upstream.mockImplementationOnce(async (input) => {
+      urls.push(new URL(String(input)))
+      return Response.json({ numFound: 1, docs: [{ key: '/works/OL3W', title: 'Atomic Habits', subject: ['Habit', 'Self-help'] }] })
+    })
+    const habits = await worker.fetch(new Request(`${origin}/api/catalog/search/openlibrary`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: 'Atomic Habits' }),
+    }), env)
+    expect(urls[2].searchParams.get('q')).toBe('title:("Atomic" AND "Habits")')
+    expect(await habits.json()).toMatchObject({ items: [{ title: 'Atomic Habits', bookType: 'Nonfiction' }] })
+
+    // Every Dashboard shelf works for books, narrowed by type.
+    for (const path of ['discover/rated/books?type=Manga', 'discover/anticipated/books', 'discover/release/books?decade=1990&year=1997']) {
+      expect((await worker.fetch(new Request(`${origin}/api/catalog/${path}`), env)).status).toBe(200)
+    }
+    const [rated, anticipated, release] = urls.slice(3)
+    expect([rated, anticipated, release].map((url) => url.searchParams.get('sort'))).toEqual(['rating', 'want_to_read', 'readinglog'])
+    expect(rated.searchParams.get('q')).toBe('subject:(manga) AND cover_i:[1 TO *] AND ratings_count:[10 TO *]')
+    expect(anticipated.searchParams.get('q')).toContain(`first_publish_year:[${new Date().getUTCFullYear()} TO *]`)
+    expect(release.searchParams.get('q')).toContain('first_publish_year:[1997 TO 1997]')
+  })
+
   it('rejects malformed, cross-site, and over-budget requests before contacting providers', async () => {
     const upstream = vi.fn<typeof fetch>()
     const worker = createCatalogWorker(upstream)

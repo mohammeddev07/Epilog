@@ -113,7 +113,7 @@ export class TmdbAdapter {
     return { items: items.slice(0, searchResultLimit), partial }
   }
 
-  async browse(token: string | undefined, category: Exclude<DiscoverSection, 'Games'>, query: BrowseQuery, page: number) {
+  async browse(token: string | undefined, category: Exclude<DiscoverSection, 'Games' | 'Books'>, query: BrowseQuery, page: number) {
     const params = { page: String(page) }
     const today = new Date().toISOString().slice(0, 10)
     const shelf = (entity: WatchEntity) => {

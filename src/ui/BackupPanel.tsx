@@ -67,8 +67,8 @@ export function BackupPanel({ onRestore }: { onRestore: (count: number) => void 
 
   return (
     <section aria-labelledby="backup-heading" className="settings-group backup-panel" aria-busy={busy}>
-      <h2 id="backup-heading">Backup</h2>
-      <p className="muted">Move your history, likes, ratings, and watchlist to another browser. Catalog art isn’t included.</p>
+      <h2 id="backup-heading">Backup &amp; Restore</h2>
+      <p className="muted">Move your reading progress, history, likes, ratings, and watchlist to another browser. Catalog art isn’t included.</p>
       <div className="action-row">
         <button type="button" className="button button-secondary" disabled={busy} onClick={download}>
           <DownloadSimpleIcon size={iconSize.md} /> Export backup
@@ -90,7 +90,7 @@ export function BackupPanel({ onRestore }: { onRestore: (count: number) => void 
         </button>
       </div>
       {error ? (
-        <motion.p className="form-error" role="alert" variants={rise} initial={animate ? 'hidden' : false} animate="visible">{error}</motion.p>
+        <p className="form-error" role="alert">{error}</p>
       ) : null}
       {preview ? (
         <motion.div className="backup-preview" variants={rise} initial={animate ? 'hidden' : false} animate="visible">

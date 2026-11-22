@@ -1,6 +1,6 @@
-import { LayoutGroup, motion } from 'motion/react'
+import { LayoutGroup } from 'motion/react'
 import { useId } from 'react'
-import { duration, easeOut, useMotionEnabled } from './motion'
+import { SelectionIndicator } from './SelectionIndicator'
 
 interface Props<T extends string> {
   value: T
@@ -12,7 +12,6 @@ interface Props<T extends string> {
 
 export function CategoryPicker<T extends string>({ value, options, onChange, label, getLabel }: Props<T>) {
   const groupId = useId()
-  const animate = useMotionEnabled()
 
   return (
     <div className="category-picker" role="group" aria-label={label}>
@@ -20,12 +19,7 @@ export function CategoryPicker<T extends string>({ value, options, onChange, lab
         {options.map((category) => (
           <button key={category} type="button" aria-pressed={category === value} onClick={() => onChange(category)}>
             {category === value ? (
-              <motion.span
-                className="category-indicator"
-                layoutId={animate ? 'selection' : undefined}
-                transition={{ duration: duration.filter, ease: easeOut }}
-                aria-hidden="true"
-              />
+              <SelectionIndicator id="selection" className="category-indicator" />
             ) : null}
             <span>{getLabel ? getLabel(category) : category}</span>
           </button>

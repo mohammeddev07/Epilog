@@ -1,13 +1,13 @@
-import { CheckIcon, FilmSlateIcon, GameControllerIcon, PlusIcon, TelevisionIcon } from '@phosphor-icons/react'
+import { BookOpenIcon, CheckIcon, FilmSlateIcon, GameControllerIcon, PlusIcon, TelevisionIcon } from '@phosphor-icons/react'
 import { AnimatePresence, motion, useIsPresent } from 'motion/react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { ComponentProps } from 'react'
 import { Link } from 'react-router'
 import { mediaKey } from '../domain/catalog'
 import { formatLabel, progressText } from '../domain/media'
 import type { LibraryEntry, Media, Status } from '../domain/media'
 import { titlePath, useOpenDetail } from './detail-navigation'
-import { layoutSpring, posterSpring, rise, useMotionEnabled } from './motion'
+import { layoutSpring, rise, useMotionEnabled } from './motion'
 import { iconSize } from './tokens'
 
 export type OpenLog = (media: Media, trigger: HTMLElement, initialStatus?: Status) => void
@@ -15,29 +15,11 @@ export type OpenLog = (media: Media, trigger: HTMLElement, initialStatus?: Statu
 export function Poster({ media, sharedId, eager = false }: { media: Media; sharedId?: string; eager?: boolean }) {
   const [failedSource, setFailedSource] = useState<string>()
   const [loadedSource, setLoadedSource] = useState<string>()
-  const [flying, setFlying] = useState(false)
-  // Motion skips onLayoutAnimationComplete when a flight is interrupted (rapid open/close), so drop the raise anyway.
-  // ponytail: fixed 1s cap (flight settles in ~0.45s); a restarted flight can lose its raise near the cap.
-  useEffect(() => {
-    if (!flying) return
-    const timer = window.setTimeout(() => setFlying(false), 1000)
-    return () => window.clearTimeout(timer)
-  }, [flying])
-  const animate = useMotionEnabled()
-  const Fallback = media.format === 'GAME' ? GameControllerIcon : media.format === 'SERIES' ? TelevisionIcon : FilmSlateIcon
+  const Fallback = media.format === 'BOOK' ? BookOpenIcon : media.format === 'GAME' ? GameControllerIcon : media.format === 'SERIES' ? TelevisionIcon : FilmSlateIcon
   const loading = Boolean(media.poster && media.poster !== loadedSource && media.poster !== failedSource)
 
   return (
-    <motion.div
-      className="poster-art"
-      data-loading={loading || undefined}
-      data-flying={flying || undefined}
-      layoutId={animate ? sharedId : undefined}
-      layoutCrossfade={false} // the source poster is hidden; a crossfade would only ghost the flying one
-      transition={posterSpring}
-      onLayoutAnimationStart={() => setFlying(true)}
-      onLayoutAnimationComplete={() => setFlying(false)}
-    >
+    <div className="poster-art" data-poster-id={sharedId} data-loading={loading || undefined}>
       {media.poster && failedSource !== media.poster ? (
         <img
           src={media.poster}
@@ -57,7 +39,7 @@ export function Poster({ media, sharedId, eager = false }: { media: Media; share
           <span className="poster-placeholder-title">{media.title}</span>
         </span>
       )}
-    </motion.div>
+    </div>
   )
 }
 
@@ -108,7 +90,7 @@ export function PosterGrid({ items, entries, shelf, onLog, titleLink, highlightI
 
   return (
     <ul className="poster-grid" aria-label={shelf}>
-      <AnimatePresence mode={animate ? 'popLayout' : 'sync'}>
+      <AnimatePresence initial={false} mode={animate ? 'popLayout' : 'sync'}>
         {items.map((media, index) => {
           const key = mediaKey(media)
           const entry = entries.get(media.id) ?? byKey.get(key)
@@ -142,7 +124,6 @@ export function PosterGrid({ items, entries, shelf, onLog, titleLink, highlightI
               initial={animate ? 'hidden' : false}
               animate="visible"
               exit={animate ? 'exit' : undefined}
-              custom={index}
               transition={layoutSpring}
             >
               {titleLink ? <Link id={id} to={titleLink(media)} className="poster-link">{content}</Link>
@@ -183,8 +164,8 @@ export function ProgressList({ entries, label }: { entries: readonly LibraryEntr
 
   return (
     <ul className="progress-grid" aria-label={label}>
-      <AnimatePresence mode={animate ? 'popLayout' : 'sync'}>
-        {entries.map((entry, index) => {
+      <AnimatePresence initial={false} mode={animate ? 'popLayout' : 'sync'}>
+        {entries.map((entry) => {
           const id = `${label}-${entry.media.id}`.replaceAll(' ', '-').toLowerCase()
           return (
             <AnimatedListItem
@@ -194,7 +175,6 @@ export function ProgressList({ entries, label }: { entries: readonly LibraryEntr
               initial={animate ? 'hidden' : false}
               animate="visible"
               exit={animate ? 'exit' : undefined}
-              custom={index}
               transition={layoutSpring}
             >
               <DetailLink media={entry.media} id={id} className="progress-card">

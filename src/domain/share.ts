@@ -1,3 +1,4 @@
+import { bookTypes } from './books'
 // Library sharing without accounts or a server: a profile travels in the link's #fragment
 // (never sent in HTTP requests), compressed, and is validated as untrusted input when opened.
 import { z } from 'zod'
@@ -15,7 +16,7 @@ const seen = (entry: LibraryEntry) => entry.status === 'Completed' || entry.stat
 
 export function badges(entries: readonly LibraryEntry[]): Badge[] {
   const completed = entries.filter((entry) => entry.status === 'Completed' || entry.completions.length > 0).length
-  const categories = new Set(entries.map((entry) => primaryCategory(entry.media))).size
+  const categories = new Set(entries.filter((entry) => entry.media.format !== 'BOOK').map((entry) => primaryCategory(entry.media))).size
   const rated = entries.filter((entry) => entry.rating).length
   const episodes = entries.reduce((sum, entry) => sum + entry.watched.length, 0)
   const encore = entries.some((entry) => entry.completions.length > 1) ? 1 : 0
@@ -45,19 +46,20 @@ export function streak(entries: readonly LibraryEntry[], today = localDate()) {
 // ---- Profile payload ----
 
 const profileLimit = 60
-const formats = { MOVIE: 'M', SERIES: 'S', GAME: 'G' } as const
-const posterPattern = /^(https:\/\/image\.tmdb\.org\/|https:\/\/images\.igdb\.com\/|\/posters\/[a-z0-9-]+\.webp$)/
+const formats = { MOVIE: 'M', SERIES: 'S', GAME: 'G', BOOK: 'B' } as const
+const posterPattern = /^(https:\/\/image\.tmdb\.org\/|https:\/\/images\.igdb\.com\/|https:\/\/covers\.openlibrary\.org\/|\/posters\/[a-z0-9-]+\.webp$)/
 
 const itemSchema = z.strictObject({
   k: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9:-]{0,127}$/),
   t: z.string().trim().min(1).max(titleLengthLimit),
-  f: z.enum(['M', 'S', 'G']),
+  f: z.enum(['M', 'S', 'G', 'B']),
+  bt: z.enum(bookTypes).optional(),
   a: z.literal(1).optional(),
   y: z.int().min(1870).max(2200).optional(),
   r: z.literal(ratings).optional(),
   l: z.literal(1).optional(),
   p: z.string().max(300).regex(posterPattern).optional(),
-})
+}).refine((item) => (item.f === 'B') === Boolean(item.bt))
 const profileSchema = z.strictObject({
   v: z.literal(1),
   n: z.string().trim().min(1).max(40).optional(),
@@ -73,6 +75,7 @@ export function buildProfile(entries: readonly LibraryEntry[], name?: string, sh
     .toSorted((a, b) => b.updatedAt - a.updatedAt).slice(0, profileLimit)
     .map(({ media, rating, liked }): ProfileItem => ({
       k: mediaKey(media), t: media.title.slice(0, titleLengthLimit), f: formats[media.format],
+      ...(media.format === 'BOOK' ? { bt: media.bookType } : {}),
       ...(media.anime ? { a: 1 as const } : {}), ...(media.year ? { y: media.year } : {}),
       ...(rating ? { r: rating } : {}), ...(liked ? { l: 1 as const } : {}),
       ...(media.poster && posterPattern.test(media.poster) ? { p: media.poster } : {}),
@@ -107,6 +110,7 @@ export function shareUrl(origin: string, payload: string) {
 
 export function itemMedia(item: ProfileItem): Media {
   const base = { id: item.k, title: item.t, year: item.y, genres: [], description: '', poster: item.p, identity: parseCatalogKey(item.k) }
+  if (item.f === 'B' && item.bt) return { ...base, format: 'BOOK', bookType: item.bt }
   return item.f === 'G' ? { ...base, format: 'GAME' } : { ...base, format: item.f === 'S' ? 'SERIES' : 'MOVIE', anime: Boolean(item.a) }
 }
 

@@ -1,3 +1,5 @@
+import { BookAdapter } from './books'
+import { bookTypes } from '../src/domain/books'
 import { browseCatalogPath, cleanQuery, discoverSections, maxCatalogPage, parseReleasePeriod, queryLimit, sectionPaths } from '../src/domain/catalog'
 import type { BrowseQuery, CatalogItems } from '../src/domain/catalog'
 import { parseCatalogKey } from '../src/domain/identity'
@@ -47,6 +49,7 @@ function readBrowse(mode: string | undefined, params: URLSearchParams): { query:
 }
 
 export function createCatalogWorker(fetcher: FetchProvider = (input, init) => fetch(input, init)) {
+  const books = new BookAdapter(fetcher)
   const tmdb = new TmdbAdapter(fetcher)
   const igdb = new IgdbAdapter(fetcher)
   const shelves = new Map<string, { value: Shelf; until: number }>()
@@ -71,13 +74,15 @@ export function createCatalogWorker(fetcher: FetchProvider = (input, init) => fe
         })
         if (rate && !rate.success) throw new CatalogFailure(429, 60)
 
-        if (action === 'search' && (key === 'tmdb' || key === 'igdb') && path.length === 2) {
-          if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json') || url.search) throw new CatalogFailure(400)
+        if (action === 'search' && (key === 'tmdb' || key === 'igdb' || key === 'openlibrary') && path.length === 2) {
+          const type = bookTypes.find((item) => item === url.searchParams.get('type'))
+          if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json') ||
+            (url.search && (key !== 'openlibrary' || !type || url.searchParams.size !== 1))) throw new CatalogFailure(400)
           const body = record(await readJson(request, 1024, 400))
           if (typeof body?.query !== 'string') throw new CatalogFailure(400)
           const query = cleanQuery(body.query)
           if (!query || query.length > queryLimit) throw new CatalogFailure(400)
-          const result = key === 'tmdb' ? await tmdb.search(env.TMDB_READ_ACCESS_TOKEN, query) : await igdb.search(credentials, query)
+          const result = key === 'openlibrary' ? await books.list(query, 1, type) : key === 'tmdb' ? await tmdb.search(env.TMDB_READ_ACCESS_TOKEN, query) : await igdb.search(credentials, query)
           return Response.json(result, { headers: responseHeaders })
         }
 
@@ -86,11 +91,18 @@ export function createCatalogWorker(fetcher: FetchProvider = (input, init) => fe
           const category = discoverSections.find((item) => sectionPaths[item] === section)
           if (!category) throw new CatalogFailure(404)
           if (action === 'discover' && key === 'popular') throw new CatalogFailure(404)
-          const { query, page } = readBrowse(action === 'popular' ? action : key, url.searchParams)
+          const params = new URLSearchParams(url.searchParams)
+          const type = bookTypes.find((type) => type === params.get('type'))
+          if (category === 'Books') {
+            if (params.has('type') && (!type || params.getAll('type').length !== 1)) throw new CatalogFailure(400)
+            params.delete('type')
+          }
+          const { query, page } = readBrowse(action === 'popular' ? action : key, params)
+          if (type) query.bookType = type
           const cacheKey = browseCatalogPath(category, query, page)
           const cached = shelves.get(cacheKey)
           if (cached && cached.until > Date.now()) return Response.json(cached.value, { headers: responseHeaders })
-          const value: Shelf = category === 'Games'
+          const value: Shelf = category === 'Books' ? await books.browse(query, page, type) : category === 'Games'
             ? await igdb.browse(credentials, query, page)
             : await tmdb.browse(env.TMDB_READ_ACCESS_TOKEN, category, query, page)
           if (!value.partial) {
@@ -104,7 +116,7 @@ export function createCatalogWorker(fetcher: FetchProvider = (input, init) => fe
 
         const identity = key ? parseCatalogKey(decodeURIComponent(key)) : undefined
         if (action === 'detail' && path.length === 2 && identity) {
-          const media = identity.provider === 'tmdb'
+          const media = identity.provider === 'openlibrary' ? await books.detail(identity.id) : identity.provider === 'tmdb'
             ? await tmdb.detail(env.TMDB_READ_ACCESS_TOKEN, identity.entity, identity.id)
             : await igdb.detail(credentials, identity.id)
           return Response.json({ items: [media] }, { headers: responseHeaders })

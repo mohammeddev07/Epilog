@@ -1,10 +1,10 @@
-import { BookmarkSimpleIcon, EyeIcon, GameControllerIcon, HeartIcon, StarIcon } from '@phosphor-icons/react'
-import { motion } from 'motion/react'
-import { useEffect, useId, useRef, useState } from 'react'
+import { BookOpenIcon, BookmarkSimpleIcon, EyeIcon, GameControllerIcon, HeartIcon, StarIcon } from '@phosphor-icons/react'
+import { AnimatePresence, motion } from 'motion/react'
+import { useEffect, useEffectEvent, useId, useRef, useState } from 'react'
 import { isWatchlisted, ratings, trackingAction } from '../domain/media'
 import type { LibraryEntry, Media, PreferenceChange } from '../domain/media'
 import type { OpenLog } from './MediaCards'
-import { rise, useMotionEnabled } from './motion'
+import { crossfade, duration, useMotionEnabled } from './motion'
 import { useModal } from './useModal'
 import { SheetHeader } from './Sheet'
 import { iconSize } from './tokens'
@@ -20,39 +20,46 @@ interface Props {
   onPreference: SavePreference
 }
 
-const holdDuration = 500
+const holdDuration = duration.hold * 1000
 const holdMovementTolerance = 10
 
 export function PopularActions({ media, entry, onInteract, onLog, onComplete, onPreference }: Props) {
   const [ratingOpen, setRatingOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const [saving, setSaving] = useState<'watch' | 'add' | 'remove' | 'like' | 'rating'>()
+  const busy = saving !== undefined
   const [error, setError] = useState('')
   const pending = useRef(false)
   const rateButton = useRef<HTMLButtonElement>(null)
   const rating = entry?.rating
   const dialog = useModal(ratingOpen, rateButton, '[data-rating-focus]')
-  const animate = useMotionEnabled()
   const liked = entry?.liked === true
   const watchlisted = isWatchlisted(entry)
 
-  async function saveAction(action: () => Promise<void>) {
+  async function saveAction(kind: NonNullable<typeof saving>, action: () => Promise<void>) {
     if (pending.current) return
     pending.current = true
     onInteract()
-    setBusy(true)
+    setSaving(kind)
     setError('')
     try {
       await action()
     } catch {
-      setError('Your change could not be saved. Try again.')
+      if (kind === 'add' || kind === 'remove') {
+        setError(`Couldn’t ${kind === 'add' ? 'add this title to' : 'remove this title from'} Watchlist. Press Watchlist to retry.`)
+      } else if (kind === 'watch') {
+        setError(`Couldn’t save this completion. Press ${trackingAction(media, entry)} to retry.`)
+      } else {
+        setError('Your change could not be saved. Try again.')
+      }
     } finally {
       pending.current = false
-      setBusy(false)
+      setSaving(undefined)
     }
   }
 
   function save(change: PreferenceChange) {
-    return saveAction(async () => {
+    const kind = change.kind === 'watchlist' ? (change.value ? 'add' : 'remove') : change.kind
+    return saveAction(kind, async () => {
       await onPreference(media, change)
       if (change.kind === 'rating') setRatingOpen(false)
     })
@@ -67,16 +74,16 @@ export function PopularActions({ media, entry, onInteract, onLog, onComplete, on
   return (
     <div className="popular-actions">
       <div className="popular-action-bar" role="group" aria-label="Title actions" aria-busy={busy}>
-        <WatchAction media={media} entry={entry} busy={busy} onTap={() => void saveAction(() => onComplete(media))} onHold={(trigger) => {
+        <WatchAction media={media} entry={entry} busy={busy} saving={saving === 'watch'} onTap={() => void saveAction('watch', () => onComplete(media))} onHold={(trigger) => {
           if (pending.current) return
           onInteract()
           onLog(media, trigger, 'Completed')
         }} />
         <button type="button" className="button popular-action" aria-pressed={liked} aria-disabled={busy} onClick={() => void save({ kind: 'like', value: !liked })}>
-          <motion.span key={String(liked)} variants={rise} initial={animate ? 'hidden' : false} animate="visible" aria-hidden="true">
-            <HeartIcon size={iconSize.xl} weight={liked ? 'fill' : 'regular'} />
-          </motion.span>
-          Like
+          <span className="toggle-icon" aria-hidden="true">
+            <HeartIcon size={iconSize.xl} /><HeartIcon size={iconSize.xl} weight="fill" />
+          </span>
+          {saving === 'like' ? 'Saving…' : 'Like'}
         </button>
         <button
           ref={rateButton} type="button" className="button popular-action" data-active={Boolean(rating) || undefined}
@@ -89,18 +96,16 @@ export function PopularActions({ media, entry, onInteract, onLog, onComplete, on
           }}
         >
           <StarIcon size={iconSize.xl} weight={rating ? 'fill' : 'regular'} />
-          <motion.span key={rating ?? 'unrated'} variants={rise} initial={animate ? 'hidden' : false} animate="visible">
-            {rating ? rating + '/5' : 'Rate'}
-          </motion.span>
+          <span>{saving === 'rating' ? 'Saving…' : rating ? rating + '/5' : 'Rate'}</span>
         </button>
         <button type="button" className="button popular-action" aria-pressed={watchlisted} aria-disabled={busy} onClick={() => void save({ kind: 'watchlist', value: !watchlisted })}>
-          <motion.span key={String(watchlisted)} variants={rise} initial={animate ? 'hidden' : false} animate="visible" aria-hidden="true">
-            <BookmarkSimpleIcon size={iconSize.xl} weight={watchlisted ? 'fill' : 'regular'} />
-          </motion.span>
-          Watchlist
+          <span className="toggle-icon" aria-hidden="true">
+            <BookmarkSimpleIcon size={iconSize.xl} /><BookmarkSimpleIcon size={iconSize.xl} weight="fill" />
+          </span>
+          {saving === 'add' ? 'Adding…' : saving === 'remove' ? 'Removing…' : 'Watchlist'}
         </button>
       </div>
-      {error && !ratingOpen ? <motion.p role="alert" className="form-error" variants={rise} initial={animate ? 'hidden' : false} animate="visible">{error}</motion.p> : null}
+      {error && !ratingOpen ? <p role="alert" className="form-error">{error}</p> : null}
       <dialog ref={dialog} className="sheet" aria-labelledby="rating-heading" onCancel={(event) => { event.preventDefault(); closeRating() }}>
         <div className="sheet-body">
           <SheetHeader id="rating-heading" title={`Rate ${media.title}`} closeLabel="Close rating" onClose={closeRating} disabled={busy} />
@@ -124,26 +129,45 @@ export function PopularActions({ media, entry, onInteract, onLog, onComplete, on
   )
 }
 
-function WatchAction({ media, entry, busy, onTap, onHold }: {
+function WatchAction({ media, entry, busy, saving, onTap, onHold }: {
   media: Media
   entry?: LibraryEntry
   busy: boolean
+  saving: boolean
   onTap: () => void
   onHold: (trigger: HTMLButtonElement) => void
 }) {
   const hint = useId()
   const animate = useMotionEnabled()
   const completed = entry?.status === 'Completed'
-  const WatchIcon = media.format === 'GAME' ? GameControllerIcon : EyeIcon
+  const WatchIcon = media.format === 'BOOK' ? BookOpenIcon : media.format === 'GAME' ? GameControllerIcon : EyeIcon
   const label = trackingAction(media, entry)
   const press = useRef<{ id: number; x: number; y: number; timer: number } | undefined>(undefined)
   const suppressClick = useRef(false)
 
-  useEffect(() => () => window.clearTimeout(press.current?.timer), [])
+  const [holding, setHolding] = useState(false)
+
+  const cancelHold = useEffectEvent(interrupt)
+  useEffect(() => {
+    window.addEventListener('blur', cancelHold)
+    document.addEventListener('visibilitychange', cancelHold)
+    return () => {
+      window.removeEventListener('blur', cancelHold)
+      document.removeEventListener('visibilitychange', cancelHold)
+      window.clearTimeout(press.current?.timer)
+    }
+  }, [])
+
+  function interrupt() {
+    if (!press.current) return
+    suppressClick.current = true
+    stopPress()
+  }
 
   function stopPress() {
     window.clearTimeout(press.current?.timer)
     press.current = undefined
+    setHolding(false)
   }
 
   return (
@@ -156,6 +180,7 @@ function WatchAction({ media, entry, busy, onTap, onHold }: {
           const trigger = event.currentTarget
           stopPress()
           suppressClick.current = false
+          setHolding(true)
           trigger.setPointerCapture(event.pointerId)
           const timer = window.setTimeout(() => {
             suppressClick.current = true
@@ -168,17 +193,18 @@ function WatchAction({ media, entry, busy, onTap, onHold }: {
           const start = press.current
           if (start?.id !== event.pointerId) return
           if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > holdMovementTolerance) {
-            suppressClick.current = true
-            stopPress()
+            interrupt()
           }
         }}
-        onPointerUp={stopPress}
+        onPointerUp={(event) => { if (press.current?.id === event.pointerId) stopPress() }}
         // After a hold the sheet rises under the finger; cancel the tap the browser would fire on lift-off.
         onTouchEnd={(event) => { if (suppressClick.current) event.preventDefault() }}
-        onPointerCancel={stopPress}
-        onLostPointerCapture={stopPress}
+        onPointerCancel={(event) => { if (press.current?.id === event.pointerId) interrupt() }}
+        onLostPointerCapture={(event) => { if (press.current?.id === event.pointerId) interrupt() }}
+        onBlur={interrupt}
         onContextMenu={(event) => event.preventDefault()}
         onKeyDown={(event) => {
+          if (event.key === 'Escape') interrupt()
           if (event.key !== 'Enter' || !event.shiftKey) return
           event.preventDefault()
           if (!busy && !event.repeat) onHold(event.currentTarget)
@@ -188,10 +214,19 @@ function WatchAction({ media, entry, busy, onTap, onHold }: {
           if (!busy && !completed) onTap()
         }}
       >
-        <motion.span key={label} variants={rise} initial={animate ? 'hidden' : false} animate="visible" aria-hidden="true">
-          <WatchIcon size={iconSize.xl} weight={completed ? 'fill' : 'regular'} />
-        </motion.span>
-        {label}
+        <span className="toggle-icon watch-icon" aria-hidden="true">
+          <WatchIcon size={iconSize.xl} /><WatchIcon size={iconSize.xl} weight="fill" />
+          {holding && <svg className="hold-ring" viewBox="0 0 32 32">
+            <circle cx="16" cy="16" r="14" pathLength="1" />
+          </svg>}
+        </span>
+        <span className="action-label">
+          <AnimatePresence initial={false}>
+            <motion.span key={label} variants={crossfade} initial={animate ? 'hidden' : false} animate="visible">
+              {saving ? 'Saving…' : label}
+            </motion.span>
+          </AnimatePresence>
+        </span>
       </button>
       <span className="sr-only" id={hint}>Hold or press Shift+Enter to open the log editor.</span>
     </>

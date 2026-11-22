@@ -1,4 +1,9 @@
+import { useState } from 'react'
+import { readDefaultSort, sorts, sortPreferenceKey } from '../ui/library-preferences'
+import type { SortKey } from '../ui/library-preferences'
 import { BackupPanel } from '../ui/BackupPanel'
+
+import { SelectionIndicator } from '../ui/SelectionIndicator'
 
 export const themes = ['system', 'light', 'dark'] as const
 export type Theme = (typeof themes)[number]
@@ -10,6 +15,15 @@ export function Settings({ theme, onTheme, storageError, onRestore }: {
   storageError: boolean
   onRestore: (count: number) => void
 }) {
+  const [sort, setSort] = useState(readDefaultSort)
+  const [sortError, setSortError] = useState(false)
+  function changeSort(value: SortKey) {
+    try {
+      localStorage.setItem(sortPreferenceKey, value)
+      setSort(value)
+      setSortError(false)
+    } catch { setSortError(true) }
+  }
   return (
     <div className="settings">
       <header className="page-intro"><div><h1 tabIndex={-1}>Settings</h1></div></header>
@@ -23,26 +37,34 @@ export function Settings({ theme, onTheme, storageError, onRestore }: {
           {themes.map((option) => (
             <label key={option}>
               <input type="radio" name="appearance" checked={theme === option} onChange={() => onTheme(option)} />
+              {theme === option && <SelectionIndicator id="appearance-selection" />}
               {option}
             </label>
           ))}
         </fieldset>
         {storageError ? <p role="alert" className="form-error">This browser could not store your appearance for next time.</p> : null}
       </section>
+      <section aria-labelledby="library-preferences" className="settings-group">
+        <h2 id="library-preferences">Library Preferences</h2>
+        <label className="field">Default library sort
+          <select className="control" value={sort} onChange={(event) => changeSort(event.target.value as SortKey)}>
+            {Object.entries(sorts).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}
+          </select>
+        </label>
+        {sortError && <p role="alert" className="form-error">Couldn’t save your sorting preference in this browser.</p>}
+      </section>
       <BackupPanel onRestore={onRestore} />
-      <section aria-labelledby="data-heading" className="settings-group">
-        <h2 id="data-heading">Privacy</h2>
-        <p className="muted">Your library stays in this browser. Catalog searches send search text or catalog IDs to TMDB and IGDB, and artwork loads from their servers. Search text is kept out of our logs.</p>
-      </section>
-      <section aria-labelledby="install-heading" className="settings-group">
-        <h2 id="install-heading">Install</h2>
+      <section aria-labelledby="app-info" className="settings-group settings-credits">
+        <h2 id="app-info">App Information</h2>
+        <h3>Privacy</h3>
+        <p className="muted">Your library stays in this browser. Catalog lookups send search text or catalog IDs to the relevant providers. Artwork loads from their servers.</p>
+        <h3>Install</h3>
         <p className="muted">Use your browser’s install option, or Add to Home Screen in Safari. After one online visit, saved titles work offline.</p>
-      </section>
-      <section aria-labelledby="credits-heading" className="settings-group settings-credits">
-        <h2 id="credits-heading">Credits</h2>
+        <h3>Catalog credits</h3>
         <a className="provider-logo" href="https://www.themoviedb.org"><img src="/credits/tmdb.svg" alt="The Movie Database" width="112" /></a>
         <p className="muted">This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
         <p className="muted">Game metadata and cover images are provided by <a className="text-link" href="https://www.igdb.com">IGDB</a>.</p>
+        <p className="muted">Book discovery and covers are provided by <a className="text-link" href="https://openlibrary.org">Open Library</a>.</p>
       </section>
     </div>
   )
