@@ -83,8 +83,10 @@ const latest = (data: EntryData) => Math.max(...groupNames.map((name) => data.gr
 function mergeEntry(current: EntryData, incoming: EntryData): EntryData {
   const groups = { ...incoming.groups }
   for (const name of groupNames) if (current.groups[name].at > incoming.groups[name].at) Object.assign(groups, { [name]: current.groups[name] })
-  const top = latest(current) > latest(incoming) ? current : incoming
-  const { format, anime, bookType, catalogRef } = top
+  const [top, other] = latest(current) > latest(incoming) ? [current, incoming] : [incoming, current]
+  const { format, anime, bookType } = top
+  // A catalog ID is permanent: a side that lacks one (a restored backup, say) never erases it.
+  const catalogRef = top.catalogRef ?? other.catalogRef
   return { format, anime, bookType, catalogRef, createdAt: Math.min(current.createdAt, incoming.createdAt), groups }
 }
 

@@ -40,6 +40,13 @@ describe('mergeChange', () => {
     expect(mergeChange(b, a).data).toMatchObject({ format: 'MOVIE', createdAt: 50 })
   })
 
+  it('keeps a catalogRef that only the older side has', () => {
+    const known = entry({ rating: { value: 3, at: 5 } }, { catalogRef: 'tmdb:movie:1' })
+    const restored = entry({ rating: { value: 4, at: 9 } })
+    expect(mergeChange(known, restored).data).toMatchObject({ catalogRef: 'tmdb:movie:1' })
+    expect(mergeChange(restored, known).data).toMatchObject({ catalogRef: 'tmdb:movie:1' })
+  })
+
   it('tombstone versus later edit', () => {
     const removed = { kind: 'entry', id: 'm1', data: null, at: 20 } as const
     expect(mergeChange(removed, entry({ rating: { value: 4, at: 30 } })).data).not.toBeNull()

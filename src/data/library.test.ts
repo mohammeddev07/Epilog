@@ -280,6 +280,10 @@ describe('IndexedDB library', () => {
     expect(changes[0]).toMatchObject({ kind: 'entry', id: film.id, data: { groups: { liked: { value: true }, rating: { value: 5 } } } })
     await store.setCursor(7, 123)
     expect(await store.account()).toMatchObject({ cursor: 7, lastSyncAt: 123 })
+    // Signing in again pulls from the start: the account may have been deleted and created again meanwhile.
+    await store.setAccount(account)
+    expect(await store.account()).toMatchObject({ cursor: 0, lastSyncAt: 123 })
+    expect(await store.pendingChanges(500)).toHaveLength(1)
     await store.setAccount(undefined)
     expect(await store.account()).toBeUndefined()
     expect(await store.lastSub()).toBe('s1')
@@ -443,7 +447,11 @@ describe('IndexedDB library', () => {
     await store.saveMergeSnapshot()
     expect((await store.mergeSnapshot())?.backup.entries).toHaveLength(1)
     await store.setAccount(account)
-    await store.clearAll()
+    await store.clearAll(true) // Replace with the account's library: the library from before stays exportable
+    expect((await store.read()).size).toBe(0)
+    expect((await store.mergeSnapshot())?.backup.entries).toHaveLength(1)
+    await store.clearAll() // Remove it from this device: nothing of the library stays
+    expect(await store.mergeSnapshot()).toBeUndefined()
     expect((await store.read()).size).toBe(0)
     expect(await store.account()).toBeUndefined()
     expect(await store.lastSub()).toBeUndefined()

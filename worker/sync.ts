@@ -70,7 +70,8 @@ async function apply(db: D1Database, userId: string, cursor: number, sent: SyncC
   ])
   const user = users.results[0] as { revision: number; purged_before: number } | undefined
   if (!user) throw new CatalogFailure(401)
-  const purgedBefore = Math.max(user.purged_before, Number((purged.results[0] as { revision: number | null }).revision ?? 0))
+  const toPurge = (purged.results[0] as { revision: number | null }).revision
+  const purgedBefore = Math.max(user.purged_before, toPurge ?? 0)
 
   // Stored aliases always point at a final id; new ones can chain within this request.
   const aliases = new Map((known.results as Alias[]).map((alias) => [alias.from_id, alias.to_id]))
@@ -94,8 +95,8 @@ async function apply(db: D1Database, userId: string, cursor: number, sent: SyncC
     aliases.set(id, target)
     created.set(id, ref)
   }
-  const changes = [...clamped.filter((change) => change.kind === 'entry'), ...clamped.filter((change) => change.kind !== 'entry')]
-    .map((change) => rekey(change, resolve))
+  const rekeyed = clamped.map((change) => rekey(change, resolve))
+  const changes = [...rekeyed.filter((change) => change.kind === 'entry'), ...rekeyed.filter((change) => change.kind !== 'entry')]
   const froms = [...created.keys()]
 
   // Stored rows for every key touched, plus the children of each newly remapped id and the episodes of its target.
@@ -153,8 +154,18 @@ async function apply(db: D1Database, userId: string, cursor: number, sent: SyncC
   const newAliases = froms.map((from, index) => [from, resolve(from), user.revision + written.length + index + 1])
   const revision = user.revision + written.length + newAliases.length
   const reset = cursor > 0 && (cursor < purgedBefore || cursor > user.revision)
+  // Each record the device sent, as stored now, when that differs from what it sent (clamped times, a newer group
+  // elsewhere): the device adopts these as is, even when nothing was written and so no revision would carry them.
+  const print = (change: SyncChange) => fingerprint(change.kind, change.id, serialize(change.data), change.at)
+  const corrected = new Map(sent.flatMap((change, index) => {
+    const stored = state.get(recordKey(rekeyed[index].kind, rekeyed[index].id))
+    return stored && print(stored) !== print(change) ? [[print(stored), stored]] : []
+  }))
+  const corrections = [...corrected.values()]
+  // A sync that changes nothing writes nothing: no gate, no purge and no revision bump.
+  const idle = !written.length && !newAliases.length && toPurge === null
 
-  const writes = [
+  const writes = idle ? [] : [
     // The gate: fails the whole batch (NOT NULL on google_sub) unless the revision is still the one we read.
     db.prepare(`INSERT INTO users (id, google_sub, email, name, created_at) SELECT ?, NULL, '', '', 0
       WHERE NOT EXISTS (SELECT 1 FROM users WHERE id = ? AND revision = ?)`).bind(userId, userId, user.revision),
@@ -176,9 +187,9 @@ async function apply(db: D1Database, userId: string, cursor: number, sent: SyncC
         WHERE user_id = ? AND to_id IN (SELECT value ->> 0 FROM json_each(?))`).bind(json, revision, userId, json),
     )
   }
+  if (!idle) writes.push(db.prepare('UPDATE users SET revision = ?, purged_before = MAX(purged_before, ?) WHERE id = ?').bind(revision, purgedBefore, userId))
   const results = await db.batch([
     ...writes,
-    db.prepare('UPDATE users SET revision = ?, purged_before = MAX(purged_before, ?) WHERE id = ?').bind(revision, purgedBefore, userId),
     reset
       // ponytail: a reset returns every live row in one response; page it if libraries outgrow a Worker response.
       ? db.prepare(`SELECT ${columns} FROM records WHERE user_id = ? AND deleted = 0 ORDER BY revision`).bind(userId)
@@ -191,15 +202,17 @@ async function apply(db: D1Database, userId: string, cursor: number, sent: SyncC
     ...(results.at(-1)!.results as Alias[]).map((alias) => [alias.from_id, alias.to_id]),
     ...clamped.flatMap((change) => (change.kind === 'entry' && resolve(change.id) !== change.id ? [[change.id, resolve(change.id)]] : [])),
   ])
-  if (reset) return { cursor: revision, changes: page.map(toChange), remap, more: false, reset: true }
+  // Corrections go first, so any newer row in the page still lands after them.
+  const rest = (rows: Row[]) => rows.filter((row) => !corrected.has(fingerprint(row.kind, row.record_id, row.data, row.updated_at))).map(toChange)
+  if (reset) return { cursor: revision, changes: [...corrections, ...rest(page)], remap, more: false, reset: true }
 
   const more = page.length > pageSize
   const pageRows = page.slice(0, pageSize)
   // What the device just sent, it already has.
-  const echoes = new Set(sent.map((change) => fingerprint(change.kind, change.id, serialize(change.data), change.at)))
+  const echoes = new Set(sent.map(print))
   return {
     cursor: more ? pageRows[pageSize - 1].revision : revision,
-    changes: pageRows.filter((row) => !echoes.has(fingerprint(row.kind, row.record_id, row.data, row.updated_at))).map(toChange),
+    changes: [...corrections, ...rest(pageRows.filter((row) => !echoes.has(fingerprint(row.kind, row.record_id, row.data, row.updated_at))))],
     remap,
     more,
   }

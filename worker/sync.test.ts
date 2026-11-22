@@ -175,6 +175,30 @@ describe('handleSync', () => {
     expect(merged.data).toMatchObject({ groups: { rating: { value: 5, at: later } } })
   })
 
+  it('returns each sent record as stored when that differs from what was sent, even when nothing was written', async () => {
+    const fast = entry('m1', 100, {}, { rating: { value: 2, at: start + 365 * 86_400_000 } })
+    const clamped = { ...entry('m1', 100, {}, { rating: { value: 2, at: start + 60_000 } }), at: start + 60_000 }
+    expect((await sync('ada', 0, [fast])).changes).toEqual([clamped])
+
+    const later = start + 120_000
+    const honest = entry('m1', 100, {}, { rating: { value: 4, at: later } })
+    await sync('ada', 1, [honest], later)
+    // A device re-pushing its older copy changes nothing, and still learns the stored row.
+    const stale = await sync('ada', 2, [clamped], later)
+    expect(stale).toEqual({ cursor: 2, changes: [{ ...honest, at: later }], remap: {}, more: false })
+    expect(revision('ada')).toBe(2)
+  })
+
+  it('writes nothing on a sync that changes nothing', async () => {
+    await sync('ada', 0, [entry('m1', 100), completion('c1', 'm1', 100)])
+    const queries: string[] = []
+    const watched: typeof db = { ...db, prepare: (query) => { queries.push(query); return db.prepare(query) } }
+    await handleSync(watched, 'ada', { cursor: 2, changes: [] }, start)
+    await handleSync(watched, 'ada', { cursor: 0, changes: [entry('m1', 100)] }, start) // a retried push
+    expect(queries.filter((query) => /^\s*(INSERT|UPDATE|DELETE)/.test(query))).toEqual([])
+    expect(revision('ada')).toBe(2)
+  })
+
   it('pages pulls of more than 500 rows with more: true', async () => {
     const completions = Array.from({ length: 501 }, (_, index) => completion(`c${index}`, 'm1', 100))
     await sync('ada', 0, completions.slice(0, 500))

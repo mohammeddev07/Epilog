@@ -63,7 +63,8 @@ function entryData(row: EntryRow, media: OwnedMedia): EntryData {
       liked: { value: row.liked, at: at('liked') },
       rating: { value: row.rating, at: at('rating') },
       watchlisted: { value: row.watchlisted, at: at('watchlisted') },
-      label: { value: media.label, at: at('label') },
+      // A catalog entry's label is the provider's title (books) or a device-only fallback: it never goes to the server.
+      label: { value: media.catalogRef ? undefined : media.label, at: at('label') },
     },
   }
 }
@@ -359,8 +360,14 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
     })
   }
 
+  /** Backups need a book title; a synced catalog book whose details haven't loaded yet has none, so it gets the shown fallback. */
+  async function backupEntries() {
+    return (await readEntries()).map((entry) => entry.media.format === 'BOOK' && !entry.media.label
+      ? { ...entry, media: { ...entry.media, label: 'Saved book' } } : entry)
+  }
+
   async function exportBackup() {
-    return db.transaction('r', records, async () => buildBackup(await readEntries()))
+    return db.transaction('r', records, async () => buildBackup(await backupEntries()))
   }
 
   async function previewRestore(backup: Backup): Promise<RestorePreview> {
@@ -378,11 +385,13 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
         throw new Error('Your library changed after the preview. Review the backup again before restoring.')
       }
       const restore = planRestore(preview.backup, current, preferBackup)
-      const now = clock()
       for (const item of restore.writes) {
         const mediaId = item.media.id
+        // Restored values are as old as the backup entry, so they never beat newer edits from other devices.
+        const at = Math.min(item.updatedAt, clock())
         const [beforeMedia, before] = await Promise.all([db.media.get(mediaId), db.entries.get(mediaId)])
-        await db.media.put(item.media)
+        // Backups leave out catalog IDs; an Open Library book's id is its own.
+        await db.media.put({ ...item.media, catalogRef: item.media.catalogRef ?? (parseCatalogKey(mediaId) ? mediaId : undefined) })
         const row = {
           mediaId,
           status: item.status,
@@ -394,14 +403,14 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
           rating: item.rating,
           watchlisted: item.watchlisted,
         }
-        await db.entries.put({ ...row, groupsAt: stampGroups(before, beforeMedia?.label, row, item.media.label, now) })
+        await db.entries.put({ ...row, groupsAt: stampGroups(before, beforeMedia?.label, row, item.media.label, at) })
         await db.completions.bulkPut(item.completions.map((completion) => ({ ...completion, mediaId })))
         await db.episodes.bulkPut(item.episodes.map((episode) => ({ ...episode, mediaId })))
         await enqueue([
           { kind: 'entry', id: mediaId },
           ...item.completions.map(({ id }) => ({ kind: 'completion' as const, id })),
           ...item.episodes.map((episode) => ({ kind: 'episode' as const, id: episodeId(mediaId, episode) })),
-        ], now)
+        ], at)
       }
       return restore.writes.length
     })
@@ -450,12 +459,15 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
     return getMeta('account')
   }
 
-  /** `undefined` signs out: the outbox is dropped, the library is kept and remembered as `lastSub`'s. */
+  /**
+   * Signs in, pulling the account from the start: the account may have been deleted and created again since this
+   * device's cursor. `undefined` signs out: the outbox is dropped, the library is kept and remembered as `lastSub`'s.
+   */
   async function setAccount(value: { sub: string; email: string; name: string } | undefined) {
     await db.transaction('rw', db.meta, db.outbox, async () => {
       const current = await getMeta('account')
       if (value) {
-        await db.meta.put({ key: 'account', value: current?.sub === value.sub ? { ...current, ...value } : { ...value, cursor: 0 } })
+        await db.meta.put({ key: 'account', value: { ...(current?.sub === value.sub ? current : {}), ...value, cursor: 0 } })
         return
       }
       await db.outbox.clear()
@@ -510,8 +522,8 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
     })
   }
 
-  /** Writes a merged change to the local tables without queuing it. */
-  async function writeChange(change: SyncChange) {
+  /** Writes a merged change to the local tables without queuing it. `fallbackLabel` stands in for a catalog entry's missing local label. */
+  async function writeChange(change: SyncChange, fallbackLabel?: string) {
     if (change.kind === 'completion') {
       if (change.data) await db.completions.put({ id: change.id, ...change.data })
       else await db.completions.delete(change.id)
@@ -525,8 +537,12 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
     } else {
       const { id, data } = change
       const { progress, liked, rating, watchlisted, label } = data.groups
-      const before = await db.entries.get(id)
-      await db.media.put({ id, format: data.format, anime: data.anime, bookType: data.bookType, catalogRef: data.catalogRef, label: label.value })
+      const [before, beforeMedia] = await Promise.all([db.entries.get(id), db.media.get(id)])
+      // Catalog entries never sync their label: keep this device's, or take a book's title from its snapshot.
+      const snapshot = data.catalogRef && data.format === 'BOOK' ? await db.catalog.where({ mediaId: id }).first() : undefined
+      const localLabel = beforeMedia?.label ?? fallbackLabel ?? snapshot?.media.title
+      await db.media.put({ id, format: data.format, anime: data.anime, bookType: data.bookType, catalogRef: data.catalogRef,
+        label: data.catalogRef ? localLabel : label.value })
       await db.entries.put({
         mediaId: id,
         status: progress.status,
@@ -547,6 +563,7 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
     if (from === to) return
     const local = await currentChange({ kind: 'entry', id: from })
     const target = await currentChange({ kind: 'entry', id: to })
+    const fromLabel = (await db.media.get(from))?.label
     const completionIds = await db.completions.where({ mediaId: from }).primaryKeys()
     await db.completions.where({ mediaId: from }).modify({ mediaId: to })
     const episodes = await db.episodes.where({ mediaId: from }).toArray()
@@ -573,20 +590,31 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
     ], clock())
     await db.entries.delete(from)
     await db.media.delete(from)
-    if (local) await writeChange(mergeChange(target, { ...local, id: to }))
+    if (local) await writeChange(mergeChange(target, { ...local, id: to }), fromLabel)
   }
 
-  /** Applies a sync response: remaps first, then merges each change, without queuing anything. */
-  async function applyRemote(changes: readonly SyncChange[], remap: Readonly<Record<string, string>>) {
+  /**
+   * Applies a sync response: remaps first, then merges each change, without queuing anything. A record in `sent` that
+   * hasn't changed since takes the server's row as is: the server already merged it, with its clamped times, so a
+   * device whose clock runs fast doesn't keep (and re-push) times that beat every later edit.
+   */
+  async function applyRemote(changes: readonly SyncChange[], remap: Readonly<Record<string, string>>, sent: readonly SyncChange[] = []) {
     await db.transaction('rw', tables, async () => {
+      const mine = new Map(sent.map((change) => [`${change.kind} ${change.id}`, JSON.stringify(change)]))
       for (const [from, to] of Object.entries(remap)) await rewriteId(from, to)
       for (const change of changes) {
         const catalogRef = change.kind === 'entry' ? change.data?.catalogRef : undefined
         const twin = catalogRef ? await db.media.where({ catalogRef }).first() : undefined
         if (twin) await rewriteId(twin.id, change.id)
         const current = await currentChange(change)
-        const merged = mergeChange(current, change)
+        const key = `${change.kind} ${change.id}`
+        const adopt = mine.get(key) === JSON.stringify(current)
+        const merged = adopt ? change : mergeChange(current, change)
         if (merged !== current) await writeChange(merged)
+        if (adopt) {
+          mine.delete(key)
+          await db.outbox.delete([change.kind, change.id]) // the server holds exactly this now
+        }
       }
     })
   }
@@ -603,13 +631,13 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
   }
 
   /** Replaces synced state with the server's full set. Records still queued stay, and are pushed next. */
-  async function resetRemote(changes: readonly SyncChange[], remap: Readonly<Record<string, string>>) {
+  async function resetRemote(changes: readonly SyncChange[], remap: Readonly<Record<string, string>>, sent: readonly SyncChange[] = []) {
     await db.transaction('rw', tables, async () => {
       const keep = new Set([...changes, ...await db.outbox.toArray()].map(({ kind, id }) => `${kind} ${id}`))
       for (const key of await localKeys()) {
         if (!keep.has(`${key.kind} ${key.id}`)) await writeChange({ ...key, data: null, at: 0 })
       }
-      await applyRemote(changes, remap)
+      await applyRemote(changes, remap, sent)
     })
   }
 
@@ -618,7 +646,7 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
     response: { cursor: number; changes: SyncChange[]; remap: Record<string, string>; reset?: true }) {
     return db.transaction('rw', tables, async () => {
       if ((await getMeta('account'))?.sub !== sub) return false
-      await (response.reset ? resetRemote : applyRemote)(response.changes, response.remap)
+      await (response.reset ? resetRemote : applyRemote)(response.changes, response.remap, sent)
       // After applying: a change the response rewrote stays queued and goes up again next page.
       await acknowledge(sent)
       await setCursor(response.cursor, clock())
@@ -626,14 +654,21 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
     })
   }
 
-  /** Queues every local record, for the first merge into an account. */
+  /**
+   * Queues every local record, for the first merge into an account. A completion's only time is when it was queued, and
+   * one already on this device (kept from before, or restored) is older than any removal of it elsewhere: it goes up at 0.
+   */
   async function enqueueAll() {
-    return db.transaction('rw', tables, async () => enqueue(await localKeys(), clock()))
+    return db.transaction('rw', tables, async () => {
+      const keys = await localKeys()
+      const completion = (key: OutboxKey) => key.kind === 'completion'
+      return await enqueue(keys.filter((key) => !completion(key)), clock()) + await enqueue(keys.filter(completion), 0)
+    })
   }
 
   async function saveMergeSnapshot() {
     await db.transaction('rw', [...records, db.meta], async () => {
-      await db.meta.put({ key: 'mergeSnapshot', value: { backup: buildBackup(await readEntries()), expiresAt: clock() + mergeSnapshotAge } })
+      await db.meta.put({ key: 'mergeSnapshot', value: { backup: buildBackup(await backupEntries()), expiresAt: clock() + mergeSnapshotAge } })
     })
   }
 
@@ -642,16 +677,24 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
     return snapshot && snapshot.expiresAt > clock() ? { backup: snapshot.backup, savedAt: snapshot.expiresAt - mergeSnapshotAge } : undefined
   }
 
-  /** Clears the library, outbox and account; cached catalog responses stay. */
-  async function clearAll() {
-    await db.transaction('rw', tables, () => Promise.all(tables.map((table) => table.clear())))
+  /** Clears the library, outbox and account; cached catalog responses stay, and so does the merge snapshot when `keepSnapshot`. */
+  async function clearAll(keepSnapshot = false) {
+    await db.transaction('rw', tables, async () => {
+      const snapshot = keepSnapshot ? await db.meta.get('mergeSnapshot') : undefined
+      await Promise.all(tables.map((table) => table.clear()))
+      if (snapshot) await db.meta.put(snapshot)
+    })
   }
 
   async function storeSnapshot(mediaId: string, media: Media) {
     await db.transaction('rw', db.media, db.catalog, async () => {
-      const key = (await db.media.get(mediaId))?.catalogRef
+      const owned = await db.media.get(mediaId)
+      const key = owned?.catalogRef
       const identity = key ? parseCatalogKey(key) : undefined
-      if (!key || !identity) return
+      if (!owned || !key || !identity) return
+      // A synced catalog book arrives without its title; keep the looked-up one so backups can name it.
+      const title = media.title.trim()
+      if (owned.format === 'BOOK' && !owned.label && title && title.length <= titleLengthLimit) await db.media.update(mediaId, { label: title })
       const now = clock()
       const expiresAt = Math.min(now, media.catalogedAt ?? now) + catalogCacheAge(identity.provider)
       if (expiresAt > now) await db.catalog.put({ key, mediaId, media, expiresAt })
