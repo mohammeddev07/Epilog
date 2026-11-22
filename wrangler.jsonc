@@ -14,9 +14,6 @@
     "logs": { "enabled": false, "invocation_logs": false },
     "traces": { "enabled": false }
   },
-  "vars": {
-    "GOOGLE_CLIENT_ID": ""
-  },
   "d1_databases": [
     {
       "binding": "DB",

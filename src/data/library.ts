@@ -1,4 +1,4 @@
-import { bookTypes } from '../domain/books'
+import { bookTypes, savedBookTitle } from '../domain/books'
 import { titleLengthLimit } from '../domain/media'
 import { Dexie, liveQuery } from 'dexie'
 import type { Table } from 'dexie'
@@ -20,7 +20,7 @@ type CompletionRow = Completion & { mediaId: string }
 type EpisodeRow = EpisodeActivity & { mediaId: string }
 type ResponseRow = { key: string; payload: CatalogPayload; writtenAt: number; expiresAt: number }
 type OutboxKey = { kind: SyncChange['kind']; id: string }
-type OutboxRow = OutboxKey & { at: number }
+type OutboxRow = OutboxKey & { at: number; parked?: true }
 type Account = { sub: string; email: string; name: string; cursor: number; lastSyncAt?: number }
 type Meta = { account: Account; lastSub: string; mergeSnapshot: { backup: Backup; expiresAt: number } }
 type MetaRow = { [K in keyof Meta]: { key: K; value: Meta[K] } }[keyof Meta]
@@ -121,7 +121,7 @@ function displayMedia(owned: OwnedMedia, snapshot?: Media): Media {
   const display = snapshot ?? demoById.get(owned.id)
   if (owned.format === 'BOOK' && owned.bookType) {
     return { ...display, id: owned.id, format: 'BOOK', anime: undefined, bookType: owned.bookType,
-      title: owned.label ?? display?.title ?? 'Saved book', description: display?.description ?? '',
+      title: owned.label ?? display?.title ?? savedBookTitle, description: display?.description ?? '',
       genres: display?.genres ?? [], identity: parseCatalogKey(owned.id) }
   }
   if (display && display.format === owned.format && Boolean(display.anime) === owned.anime) {
@@ -256,8 +256,12 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
       if (entry.media.format === 'BOOK' && (!entry.media.title.trim() || entry.media.title.length > titleLengthLimit || !bookTypes.includes(entry.media.bookType))) {
         throw new Error('Enter a valid book title and choose a book type.')
       }
-      const book = entry.media.format === 'BOOK' ? { bookType: entry.media.bookType, label: entry.media.title } : {}
-      const saved = { id, format: owned.format, anime: owned.anime, catalogRef: key ?? owned.catalogRef, label: entry.label, ...book }
+      const catalogRef = key ?? owned.catalogRef
+      const book = entry.media.format === 'BOOK' ? {
+        bookType: entry.media.bookType,
+        label: catalogRef && entry.media.title === savedBookTitle ? owned.label : entry.media.title,
+      } : {}
+      const saved = { id, format: owned.format, anime: owned.anime, catalogRef, label: entry.label, ...book }
       await db.media.put(saved)
       const row = {
         mediaId: id,
@@ -270,12 +274,14 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
         rating: entry.rating,
         watchlisted: entry.watchlisted,
       }
-      await db.entries.put({ ...row, groupsAt: stampGroups(before, owned.label, row, saved.label, updatedAt) })
-
       const kept = new Set(entry.completions.map((completion) => completion.id))
       const dropped = stored?.completions.filter((completion) => !kept.has(completion.id)).map((completion) => completion.id) ?? []
       if (dropped.length) await db.completions.bulkDelete(dropped)
       const added = entry.completions.filter((completion) => !stored?.completions.some((item) => item.id === completion.id))
+      const groupsAt = stampGroups(before, owned.label, row, saved.label, updatedAt)
+      // A new watch edits the parent even when its progress values still say Completed.
+      if (added.length) groupsAt.progress = updatedAt
+      await db.entries.put({ ...row, groupsAt })
       for (const completion of added) await db.completions.add({ ...completion, mediaId: id })
       const cleared = stored && !entry.unwatched.length ? stored.episodes.filter(({ watched }) => !watched) : []
       if (cleared.length) await db.episodes.bulkDelete(cleared.map(({ season, number }): [string, number, number] => [id, season, number]))
@@ -360,14 +366,8 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
     })
   }
 
-  /** Backups need a book title; a synced catalog book whose details haven't loaded yet has none, so it gets the shown fallback. */
-  async function backupEntries() {
-    return (await readEntries()).map((entry) => entry.media.format === 'BOOK' && !entry.media.label
-      ? { ...entry, media: { ...entry.media, label: 'Saved book' } } : entry)
-  }
-
   async function exportBackup() {
-    return db.transaction('r', records, async () => buildBackup(await backupEntries()))
+    return db.transaction('r', records, async () => buildBackup(await readEntries()))
   }
 
   async function previewRestore(backup: Backup): Promise<RestorePreview> {
@@ -390,7 +390,7 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
         // Restored values are as old as the backup entry, so they never beat newer edits from other devices.
         const at = Math.min(item.updatedAt, clock())
         const [beforeMedia, before] = await Promise.all([db.media.get(mediaId), db.entries.get(mediaId)])
-        // Backups leave out catalog IDs; an Open Library book's id is its own.
+        // Most catalog books can recover their catalog reference directly from their ID.
         await db.media.put({ ...item.media, catalogRef: item.media.catalogRef ?? (parseCatalogKey(mediaId) ? mediaId : undefined) })
         const row = {
           mediaId,
@@ -508,9 +508,31 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
 
   async function pendingChanges(limit: number) {
     return db.transaction('r', tables, async () => {
-      const queued = await db.outbox.orderBy('at').limit(limit).toArray()
+      const queued = await db.outbox.orderBy('at').filter((row) => !row.parked).limit(limit).toArray()
       return Promise.all(queued.map(async (key) => (await currentChange(key))!))
     })
+  }
+
+  /** Keeps a rejected row for recovery without blocking later pushes. A new local edit queues it again. */
+  async function parkChanges(sub: string, changes: readonly SyncChange[]) {
+    return db.transaction('rw', tables, async () => {
+      if ((await getMeta('account'))?.sub !== sub) return false
+      for (const change of changes) {
+        const key: [OutboxKey['kind'], string] = [change.kind, change.id]
+        if (JSON.stringify(await currentChange(change)) === JSON.stringify(change)) {
+          await db.outbox.update(key, { parked: true })
+        }
+      }
+      return true
+    })
+  }
+
+  function parkedChanges() {
+    return db.outbox.filter((row) => Boolean(row.parked)).count()
+  }
+
+  async function hasUnsyncedChanges() {
+    return (await db.outbox.count()) > 0
   }
 
   /** Drops each sent change from the outbox unless the record changed after it was read. */
@@ -660,7 +682,9 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
    */
   async function enqueueAll() {
     return db.transaction('rw', tables, async () => {
-      const keys = await localKeys()
+      // Keep existing queue times and leave permanent failures parked when reauthenticating.
+      const queued = new Set((await db.outbox.toArray()).map(({ kind, id }) => `${kind} ${id}`))
+      const keys = (await localKeys()).filter(({ kind, id }) => !queued.has(`${kind} ${id}`))
       const completion = (key: OutboxKey) => key.kind === 'completion'
       return await enqueue(keys.filter((key) => !completion(key)), clock()) + await enqueue(keys.filter(completion), 0)
     })
@@ -668,7 +692,7 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
 
   async function saveMergeSnapshot() {
     await db.transaction('rw', [...records, db.meta], async () => {
-      await db.meta.put({ key: 'mergeSnapshot', value: { backup: buildBackup(await backupEntries()), expiresAt: clock() + mergeSnapshotAge } })
+      await db.meta.put({ key: 'mergeSnapshot', value: { backup: buildBackup(await readEntries()), expiresAt: clock() + mergeSnapshotAge } })
     })
   }
 
@@ -694,7 +718,7 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
       if (!owned || !key || !identity) return
       // A synced catalog book arrives without its title; keep the looked-up one so backups can name it.
       const title = media.title.trim()
-      if (owned.format === 'BOOK' && !owned.label && title && title.length <= titleLengthLimit) await db.media.update(mediaId, { label: title })
+      if (owned.format === 'BOOK' && (!owned.label || owned.label === savedBookTitle) && title && title.length <= titleLengthLimit) await db.media.update(mediaId, { label: title })
       const now = clock()
       const expiresAt = Math.min(now, media.catalogedAt ?? now) + catalogCacheAge(identity.provider)
       if (expiresAt > now) await db.catalog.put({ key, mediaId, media, expiresAt })
@@ -712,7 +736,7 @@ export function createLibrary(name = 'epilog', clock = Date.now, changed: () => 
   return {
     read, watch, save, completeToday, uncomplete, savePreference, setEpisode, remove, exportBackup, previewRestore, applyRestore,
     purgeExpired, refreshSnapshot, readResponse, cacheResponse,
-    account, setAccount, lastSub, setCursor, pendingChanges, acknowledge, applyRemote, resetRemote, commitSync, enqueueAll,
+    account, setAccount, lastSub, setCursor, pendingChanges, parkChanges, parkedChanges, hasUnsyncedChanges, acknowledge, applyRemote, resetRemote, commitSync, enqueueAll,
     saveMergeSnapshot, mergeSnapshot, clearAll, storeSnapshot, missingSnapshots,
     close: () => db.close(),
     deleteDatabase: () => db.delete(),

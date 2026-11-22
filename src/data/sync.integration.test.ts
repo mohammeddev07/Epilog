@@ -160,6 +160,25 @@ describe('two devices against the real sync handler', () => {
     expect(liveRecords('entry')).toHaveLength(0)
   })
 
+  it('keeps a later rewatch attached when another device concurrently removes the completed title', async () => {
+    const a = device()
+    const b = device()
+    await a.store.completeToday(moon)
+    await a.signIn()
+    await b.signIn()
+    const { media } = await only(b.store)
+    now += minute
+    await a.store.remove(media.id)
+    now += 1 // both edits are pending independently, but the rewatch happened later
+    await b.store.save(media, { status: 'Completed', completion: { id: 'rewatch', date: '2026-11-22' } })
+    await settle(a, b)
+    for (const { store } of [a, b]) {
+      expect(await only(store)).toMatchObject({ status: 'Completed', completions: [{ id: 'rewatch' }] })
+    }
+    expect(liveRecords('entry')).toHaveLength(1)
+    expect(liveRecords('completion')).toHaveLength(1)
+  })
+
   it('does not let a device with a clock a year fast win conflicts it re-pushes', async () => {
     const a = device()
     const fast = device(365 * 24 * 60 * minute)
@@ -256,7 +275,15 @@ describe('two devices against the real sync handler', () => {
     await b.signIn()
     const books = () => b.store.read().then((entries) => [...entries.values()].map(({ media }) => media.title).sort())
     expect(await books()).toEqual(['Field Notes', 'Saved book'])
-    expect(parseBackup(JSON.stringify(await b.store.exportBackup())).entries).toHaveLength(2) // still a valid v3 backup
+    const backup = parseBackup(JSON.stringify(await b.store.exportBackup()))
+    expect(backup.entries).toHaveLength(2)
+    expect(backup.entries.find(({ media }) => media.id === dune.id)?.media.label).toBeUndefined()
+    const restored = device()
+    await restored.store.applyRestore(await restored.store.previewRestore(backup), false)
+    expect((await restored.store.read()).get(dune.id)).toMatchObject({ status: 'Completed', completions: [{ id: 'c-dune' }] })
+    expect(await restored.store.missingSnapshots()).toEqual([{ mediaId: dune.id, catalogRef: dune.id }])
+    await restored.store.storeSnapshot(dune.id, dune)
+    expect((await restored.store.read()).get(dune.id)?.media.title).toBe('Dune')
     await b.store.storeSnapshot(dune.id, dune) // the background lookup
     now += 2 * 24 * 60 * minute // past the snapshot: the stored label carries the title
     expect(await books()).toEqual(['Dune', 'Field Notes'])
@@ -266,6 +293,28 @@ describe('two devices against the real sync handler', () => {
     await settle(b, a)
     expect((await a.store.read()).get(dune.id)).toMatchObject({ rating: 5, media: { title: 'Dune' } })
     expect(JSON.stringify(db.dump('records'))).not.toContain('Dune')
+  })
+
+  it('restores a pending catalog book under its remapped id and repairs an old fallback label', async () => {
+    const a = device()
+    const b = device()
+    const id = 'remapped-book'
+    const groups = { progress: { status: 'In progress' as const, at: now }, liked: { at: 0 },
+      rating: { at: 0 }, watchlisted: { at: 0 }, label: { at: 0 } }
+    await a.store.applyRemote([{ kind: 'entry', id, at: now, data: {
+      format: 'BOOK', anime: false, bookType: 'Novel', catalogRef: dune.id, createdAt: now, groups,
+    } }], {})
+    await a.store.savePreference((await only(a.store)).media, { kind: 'rating', value: 4 })
+    const raw = await a.store.exportBackup()
+    expect(raw.entries[0].media).toMatchObject({ id, catalogRef: dune.id, label: undefined })
+    const legacy = { ...raw, entries: [{ ...raw.entries[0], media: { ...raw.entries[0].media, label: 'Saved book' } }] }
+    const backup = parseBackup(JSON.stringify(legacy))
+    await b.store.applyRestore(await b.store.previewRestore(backup), true)
+    expect(await b.store.missingSnapshots()).toEqual([{ mediaId: id, catalogRef: dune.id }])
+    await b.store.storeSnapshot(id, dune)
+    expect(await only(b.store)).toMatchObject({ media: { id, title: 'Dune' }, rating: 4 })
+    await b.store.applyRestore(await b.store.previewRestore(backup), true)
+    expect((await only(b.store)).media.title).toBe('Dune')
   })
 
   it('adopts the other device’s id for a twin logged while a request was out', async () => {

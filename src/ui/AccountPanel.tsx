@@ -45,7 +45,7 @@ export function AccountPanel() {
     setError('')
     setNotice('')
     setSheet(kind)
-    if (kind === 'sign-out') void library.pendingChanges(1).then((changes) => setUnsynced(changes.length > 0), () => setUnsynced(false))
+    if (kind === 'sign-out') void library.hasUnsyncedChanges().then(setUnsynced, () => setUnsynced(false))
   }
 
   function close() {
@@ -110,6 +110,12 @@ export function AccountPanel() {
               <button type="button" className="text-action" onClick={() => void sync.syncNow()}>Try again</button>
             </>
           ) : null}
+          {state.parkedCount ? (
+            <p role="alert" className="form-error">
+              {state.parkedCount === 1 ? 'One change was rejected' : `${state.parkedCount} changes were rejected`} and kept on this device.
+              Other changes can still sync. Edit the affected record to try again, or export a backup from this device.
+            </p>
+          ) : null}
           <div className="action-row">
             <button ref={signOutButton} type="button" className="button button-secondary" aria-haspopup="dialog" onClick={() => open('sign-out')}>Sign out</button>
             {state.status === 'signed-out' ? null : (
@@ -122,7 +128,9 @@ export function AccountPanel() {
         <div className="sheet-body">
           <SheetHeader id="sign-out-heading" title="Sign out?" closeLabel="Cancel" onClose={close} disabled={busy} />
           <p className="muted">Your synced library stays in your account. Keep this device’s copy to go on using it as a guest, or remove it.</p>
-          {unsynced ? <p className="muted">Some changes on this device haven’t synced yet. Removing this device’s copy syncs them first, and keeps the library if they can’t be synced.</p> : null}
+          {unsynced ? <p className="muted">{state.status === 'signed-out'
+            ? 'Sign in again to sync this device’s changes before removing its library.'
+            : 'Some changes on this device haven’t synced yet. Removing this device’s copy syncs them first, and keeps the library if they can’t be synced.'}</p> : null}
           <div className="sheet-actions">
             <button type="button" className="button button-primary" data-sign-out-focus disabled={busy} onClick={() => void leave(true)}>Keep this device’s copy</button>
             <button type="button" className="button button-danger" disabled={busy} onClick={() => void leave(false)}>Remove it from this device</button>

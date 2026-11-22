@@ -60,7 +60,7 @@ IGDB_CLIENT_SECRET=
 
 Get the read access token from [TMDB API Settings](https://www.themoviedb.org/settings/api). Create an application with the Confidential client type in the [Twitch Developer Console](https://dev.twitch.tv/console/apps) for IGDB. Books use Open Library’s public API, which needs no key.
 
-Sign-in and sync are optional. To try them locally, add `GOOGLE_CLIENT_ID=` with your OAuth client ID (see [Google sign-in and sync](#google-sign-in-and-sync)) to `.env.catalog.local`. It isn't a secret. While it's empty, the account routes return 404 and the app behaves as it does without sync. Local D1 needs the migrations applied once with `npx wrangler d1 migrations apply epilog --local`.
+Sign-in and sync are optional. To try them locally, add `GOOGLE_CLIENT_ID=` with your OAuth client ID (see [Google sign-in and sync](#google-sign-in-and-sync)) to `.env.catalog.local`. It isn't a secret. While it's empty, the account routes return 404 and the app behaves as it does without sync. Local D1 needs the migrations applied once with `npx wrangler d1 migrations apply epilog --local`. To preview the privacy page’s email link, optionally set `PRIVACY_CONTACT_EMAIL` in the same local file.
 
 Run `npm run dev` and open the Wrangler loopback URL for live catalog search and the installable PWA. Run `npm run dev:ui` for Vite hot reload with the fictional demo catalog. These modes use different local origins and maintain separate libraries.
 
@@ -96,10 +96,10 @@ Sign-in is optional and syncs the library across devices. It stores the Google a
 
 1. In Google Cloud Console, create an OAuth client of type **Web application**. Add the authorized JavaScript origins `https://epilog.pages.dev`, `http://localhost:8787`, and `http://localhost`.
 2. Configure the OAuth consent screen as **External**. Set the app name, the homepage `https://epilog.pages.dev`, the privacy policy `https://epilog.pages.dev/privacy`, the scopes `openid email profile`, and a developer contact email. Publish it, since only non-sensitive scopes are used.
-3. Set `GOOGLE_CLIENT_ID` in the `vars` of `wrangler.jsonc` to the client ID. It isn't secret. `.env.catalog.local` can hold it for local runs.
+3. In the GitHub repository, open **Settings → Secrets and variables → Actions → New repository secret**. Add `GOOGLE_CLIENT_ID` with your OAuth Web client ID. The release workflow supplies the value when it bundles the Worker. The browser uses this public client ID for Google Sign-In.
 4. Run `npx wrangler d1 create epilog` and replace the `database_id` placeholder in `wrangler.jsonc` with the id it prints.
 5. Apply the migrations with `npx wrangler d1 migrations apply epilog --remote`. The release workflow does this before each deploy.
-6. Replace `PRIVACY_CONTACT_EMAIL` in `src/screens/Privacy.tsx` with the contact address for the privacy page.
+6. Optionally add `PRIVACY_CONTACT_EMAIL` as another GitHub Actions repository secret. Use a public contact alias you’re comfortable displaying on the privacy page. Leave it unset to omit the link.
 
 Until `GOOGLE_CLIENT_ID` is set, the account routes return 404 and Epilog works as it does without sign-in. Sync requests use the `SYNC_RATE_LIMITER` binding, and the Worker allows requests without it if the binding is missing.
 
@@ -111,7 +111,7 @@ D1's Free plan allows 100,000 rows written a day, and every index entry counts a
 
 [Release workflow](.github/workflows/release.yml) tests and deploys pushes to `release`, including merged pull requests. After Cloudflare accepts the deployment, it publishes a GitHub release and tag. The first tag comes from `package.json`. Later releases increment the latest stable tag’s patch version unless `package.json` specifies a higher version.
 
-Create the `release` branch before the first production merge. Set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as GitHub Actions secrets, preferably on the `production` environment. Scope the token to the Cloudflare account that owns Epilog and grant Workers Scripts Edit, Cloudflare Pages Edit, and D1 Edit. The catalog credentials stay in the deployed Worker’s secret bindings. [Cloudflare’s CI authentication guide](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/#1-authentication).
+Create the `release` branch before the first production merge. Set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` as GitHub Actions secrets, preferably on the `production` environment. Scope the token to the Cloudflare account that owns Epilog and grant Workers Scripts Edit, Cloudflare Pages Edit, and D1 Edit. The catalog credentials stay in the deployed Worker’s secret bindings. The release workflow embeds `GOOGLE_CLIENT_ID` and `PRIVACY_CONTACT_EMAIL` in the server-side bundle without creating Cloudflare variable or secret bindings for them. Changes take effect on the next GitHub Actions deploy. [Cloudflare’s CI authentication guide](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/#1-authentication).
 
 Once the workflow is on GitHub’s default branch, select **Actions → Release → Run workflow** and enter an existing tag from `release` history, such as `v0.1.0`. This builds and deploys the selected revision to the production Worker and Pages project using its Wrangler configuration. It creates no additional GitHub release. [GitHub’s manual workflow guide](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
 

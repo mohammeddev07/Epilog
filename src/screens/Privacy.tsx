@@ -1,6 +1,22 @@
-const contact = 'PRIVACY_CONTACT_EMAIL'
+import { useEffect, useState } from 'react'
+import { z } from 'zod'
+
+const contactResponse = z.object({ email: z.email().nullable() })
 
 export function Privacy() {
+  const [contact, setContact] = useState<string | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    void fetch('/api/privacy-contact', { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) return
+        const result = contactResponse.safeParse(await response.json())
+        if (!controller.signal.aborted && result.success) setContact(result.data.email)
+      })
+      .catch(() => { /* The policy still works offline without the contact link. */ })
+    return () => controller.abort()
+  }, [])
+
   return (
     <article className="privacy">
       <header className="page-intro">
@@ -11,7 +27,7 @@ export function Privacy() {
         <p>When you sign in with Google, Epilog stores:</p>
         <ul>
           <li>Your Google account ID, email address and name, as Google shares them at sign-in.</li>
-          <li>Your tracking records: statuses, completion dates, watched episodes, reading progress, playtime, likes, ratings, Watchlist, labels you enter, and each title’s format, book type and anime flag.</li>
+          <li>Your tracking records: statuses, completion dates, watched episodes, reading progress, playtime, likes, ratings, Watchlist, labels you enter for titles without a catalog ID, and each title’s format, book type and anime flag.</li>
           <li>Catalog IDs, which say which TMDB, IGDB or Open Library title a record is about. Titles, descriptions and artwork are not stored; your devices look them up from the catalogs.</li>
           <li>A sign-in session, kept in a secure cookie that only Epilog’s server can read.</li>
         </ul>
@@ -33,10 +49,12 @@ export function Privacy() {
         <h2 id="privacy-retention">How long it’s kept</h2>
         <p>Until you delete your account. Inactive accounts are not purged. When you remove a title, a deletion marker without its details stays for 180 days so your other devices learn about the removal.</p>
       </section>
-      <section aria-labelledby="privacy-contact">
-        <h2 id="privacy-contact">Contact</h2>
-        <p>Questions or requests: <a className="text-link" href={`mailto:${contact}`}>{contact}</a></p>
-      </section>
+      {contact && (
+        <section aria-labelledby="privacy-contact">
+          <h2 id="privacy-contact">Contact</h2>
+          <p>For privacy questions or requests, email <a className="text-link" href={`mailto:${encodeURIComponent(contact).replace('%40', '@')}`}>{contact}</a>.</p>
+        </section>
+      )}
     </article>
   )
 }

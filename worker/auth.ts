@@ -1,5 +1,6 @@
 import { maxSyncBytes } from '../src/domain/sync'
 import type { D1Database } from './d1'
+import { deploymentConfig } from './deployment-config'
 import { CatalogFailure, errorResponse, isJson, readJson, record, rejectCrossSite, responseHeaders } from './http'
 import type { Env } from './index'
 import { handleSync } from './sync'
@@ -100,7 +101,8 @@ export function createAccountRoutes(options: { keys?: () => Promise<JsonWebKey[]
       let renewed: string | undefined
       try {
         rejectCrossSite(request, url)
-        const { DB: db, GOOGLE_CLIENT_ID: clientId } = env
+        const db = env.DB
+        const clientId = env.GOOGLE_CLIENT_ID ?? deploymentConfig.googleClientId
         if (path === '/api/config') {
           if (request.method !== 'GET') throw new CatalogFailure(405)
           return reply({ googleClientId: db && clientId ? clientId : '' })

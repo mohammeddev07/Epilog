@@ -304,6 +304,7 @@ test('Settings mentions Epilog’s server only where sign-in is available', asyn
 test('welcome and privacy pages pass axe', async ({ browser }) => {
   const { context, page } = await open(browser, fakeServer(), 'sub-axe')
   const axe = () => new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+  await page.route('**/api/privacy-contact', (route) => route.fulfill({ json: { email: 'privacy@example.test' } }))
   try {
     await page.goto('/')
     await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeVisible()
@@ -312,6 +313,7 @@ test('welcome and privacy pages pass axe', async ({ browser }) => {
     await page.getByRole('link', { name: 'Privacy policy' }).click()
     await expect(page.getByRole('heading', { level: 1, name: 'Privacy policy' })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'What’s stored' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'privacy@example.test' })).toHaveAttribute('href', 'mailto:privacy@example.test')
     expect((await axe()).violations).toEqual([])
   } finally {
     await context.close()
@@ -351,6 +353,32 @@ test('Settings shows the account and last sync, and a sync error offers Try agai
   }
 })
 
+test('Settings reports a parked change and healthy edits still sync', async ({ browser }) => {
+  const server = fakeServer()
+  const sub = 'sub-parked'
+  const { context, page } = await open(browser, server, sub)
+  const account = accountPanel(page)
+  try {
+    await signInFromWelcome(page)
+    await page.route('**/api/sync', async (route) => {
+      const { changes } = route.request().postDataJSON() as { changes: SyncChange[] }
+      if (changes.some((change) => change.kind === 'entry' && change.data?.catalogRef === moon.id)) {
+        await route.fulfill({ status: 400, json: { error: 'invalid_request' } })
+      } else await route.fallback()
+    })
+    await logFromSearch(page, 'Moon Lantern')
+    await logFromSearch(page, 'Sun Harbor')
+    await page.goto('/settings')
+    await expect(account.getByRole('alert')).toContainText('One change was rejected and kept on this device.')
+    await expect.poll(() => server.records(sub, 'entry').map(({ data }) => (data as EntryData).catalogRef)).toEqual([sun.id])
+    await page.reload()
+    await expect(account.getByRole('alert')).toContainText('One change was rejected')
+    await expect(await movieTitles(page)).toContainText('Moon Lantern')
+  } finally {
+    await context.close()
+  }
+})
+
 test('a guest can sign in from Settings, and an expired session asks to sign in again without losing queued edits', async ({ browser }) => {
   const server = fakeServer()
   const { context, page } = await open(browser, server, 'sub-ada')
@@ -368,6 +396,13 @@ test('a guest can sign in from Settings, and an expired session asks to sign in 
     await expect(account.getByRole('heading', { name: 'Sign in again' })).toBeVisible()
     await page.waitForTimeout(2500) // past the sync debounce: nothing reaches the server
     expect(server.records('sub-ada', 'entry')).toHaveLength(0)
+
+    await account.getByRole('button', { name: 'Sign out' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Sign out?' })
+    await dialog.getByRole('button', { name: 'Remove it from this device' }).click()
+    await expect(dialog.getByRole('alert')).toHaveText('Your session ended before these changes could sync. Sign in again to sync them, or keep this device’s copy.')
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    expect(server.calls.logout).toBe(0)
 
     server.network.expired = false
     await account.getByRole('button', { name: 'Continue with Google' }).click()

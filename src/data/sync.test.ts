@@ -291,6 +291,62 @@ describe('sync loop', () => {
     expect(await store.pendingChanges(1000)).toEqual([])
   })
 
+  it('validates old invalid outbox rows before sending and preserves them locally', async () => {
+    const store = open()
+    await store.setAccount(account)
+    const invalid = { ...film, id: 'x'.repeat(257) }
+    await store.save(invalid, { status: 'Planned' })
+    await store.save(film, { status: 'Planned' })
+    const { fetch, requests } = server()
+    const sync = create(store, fetch)
+    await sync.syncNow()
+    expect(requests.map(({ body }) => body.changes.map(({ id }) => id))).toEqual([[film.id]])
+    expect(sync.state()).toMatchObject({ status: 'idle', parkedCount: 1 })
+    expect((await store.read()).get(invalid.id)?.status).toBe('Planned')
+    expect(await store.hasUnsyncedChanges()).toBe(true)
+    await store.enqueueAll()
+    expect((await store.pendingChanges(500)).map(({ id }) => id)).toEqual([film.id])
+  })
+
+  it.each([400, 413])('isolates a %i to the rejected row and lets a fresh edit sync', async (status) => {
+    const store = open()
+    await store.setAccount(account)
+    const first = { ...film, id: 'a-bad' }
+    await store.save(first, { status: 'Planned' })
+    await store.save(film, { status: 'Planned' })
+    const { fetch, requests } = server({ status }, { status })
+    const sync = create(store, fetch)
+    await sync.syncNow()
+    expect(requests.map(({ body }) => body.changes.map(({ id }) => id))).toEqual([
+      [first.id, film.id], [first.id], [film.id],
+    ])
+    expect(await store.pendingChanges(1)).toEqual([])
+    expect(await store.hasUnsyncedChanges()).toBe(true)
+    expect(sync.state()).toMatchObject({ status: 'idle', parkedCount: 1 })
+    await store.save(first, { status: 'In progress' })
+    await sync.syncNow()
+    expect(requests.at(-1)?.body.changes[0]?.id).toBe(first.id)
+    expect(sync.state().parkedCount).toBeUndefined()
+    expect(await store.hasUnsyncedChanges()).toBe(false)
+  })
+
+  it('leaves a record queued if it was corrected during a rejected push', async () => {
+    const store = open()
+    await store.setAccount(account)
+    await store.save(film, { status: 'Planned' })
+    const held = hold()
+    const { fetch, requests } = server(held.reply)
+    const sync = create(store, fetch)
+    const busy = sync.syncNow()
+    await held.inside
+    await store.save(film, { status: 'In progress' })
+    held.release({ status: 400 })
+    await busy
+    expect(requests).toHaveLength(2)
+    expect(requests[1].body.changes[0].data).toMatchObject({ groups: { progress: { status: 'In progress' } } })
+    expect(await store.parkedChanges()).toBe(0)
+  })
+
   it('replaces synced state on a reset', async () => {
     const store = open()
     await store.setAccount(account)

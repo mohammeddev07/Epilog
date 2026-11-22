@@ -1,4 +1,4 @@
-import { bookTypes, readingUnits } from './books'
+import { bookTypes, readingUnits, savedBookTitle } from './books'
 import { z } from 'zod'
 import { backupFormat, backupSizeLimit, backupVersion } from './backup'
 import type { Backup } from './backup'
@@ -48,12 +48,13 @@ const preferenceEntry = entrySchema.extend({
   rating: z.literal(ratings).optional(),
   watchlisted: z.boolean().optional(),
 })
+const bookRef = z.string().regex(/^openlibrary:work:OL[1-9]\d{0,11}W$/)
 const bookMedia = mediaSchema.extend({
-  id: z.union([safeIdentifier, z.string().regex(/^openlibrary:work:OL[1-9]\d{0,11}W$/)]),
+  id: z.union([safeIdentifier, bookRef]),
   format: z.literal('BOOK'), anime: z.literal(false),
-  label: z.string().trim().min(1).max(titleLengthLimit),
+  catalogRef: bookRef.optional(),
   bookType: z.enum(bookTypes),
-})
+}).refine(({ id, label, catalogRef }) => label !== undefined || catalogRef !== undefined || bookRef.safeParse(id).success)
 const readingSchema = z.strictObject({
   unit: z.enum(readingUnits), count: z.int().nonnegative(), total: z.int().positive().optional(),
 }).refine(({ count, total }) => total === undefined || count <= total)
@@ -85,6 +86,10 @@ export function parseBackup(text: string): Backup {
       (media.format !== 'GAME' && entry.playtimeMinutes !== undefined) ||
       (media.format === 'GAME' && media.anime)) {
       throw new Error('This backup contains inconsistent tracking records.')
+    }
+    // Old exports could persist the temporary display title before catalog details had loaded.
+    if (media.format === 'BOOK' && media.label === savedBookTitle && (media.catalogRef || bookRef.safeParse(media.id).success)) {
+      delete media.label
     }
     mediaIds.add(media.id)
     for (const { id } of completions) {

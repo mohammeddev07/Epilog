@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { BookAdapter } from './books'
 import { bookTypes } from '../src/domain/books'
 import { browseCatalogPath, cleanQuery, discoverSections, maxCatalogPage, parseReleasePeriod, queryLimit, sectionPaths } from '../src/domain/catalog'
@@ -5,6 +6,7 @@ import type { BrowseQuery, CatalogItems } from '../src/domain/catalog'
 import { parseCatalogKey } from '../src/domain/identity'
 import { createAccountRoutes } from './auth'
 import type { D1Database } from './d1'
+import { deploymentConfig } from './deployment-config'
 import { CatalogFailure, errorResponse, isJson, readJson, record, rejectCrossSite, responseHeaders } from './http'
 import type { FetchProvider } from './http'
 import { IgdbAdapter } from './igdb'
@@ -18,12 +20,14 @@ export interface Env {
   SYNC_RATE_LIMITER?: RateLimiter
   DB?: D1Database
   GOOGLE_CLIENT_ID?: string
+  PRIVACY_CONTACT_EMAIL?: string
 }
 
 export interface RateLimiter {
   limit(options: { key: string }): Promise<{ success: boolean }>
 }
 
+const privacyEmail = z.email().max(254)
 const routePrefix = '/api/catalog/'
 const cacheAge = 20 * 60_000
 const shelfCacheLimit = 64
@@ -61,6 +65,13 @@ export function createCatalogWorker(
       if (account) return account
       try {
         const url = new URL(request.url)
+        if (url.pathname === '/api/privacy-contact') {
+          rejectCrossSite(request, url)
+          if (request.method !== 'GET') throw new CatalogFailure(405)
+          const contact = env.PRIVACY_CONTACT_EMAIL ?? deploymentConfig.privacyContactEmail
+          const email = privacyEmail.safeParse(contact?.trim()).data
+          return Response.json({ email: email ?? null }, { headers: responseHeaders })
+        }
         if (!url.pathname.startsWith(routePrefix)) throw new CatalogFailure(404)
         rejectCrossSite(request, url)
         const path = url.pathname.slice(routePrefix.length).split('/')

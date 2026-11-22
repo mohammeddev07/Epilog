@@ -1,14 +1,15 @@
 import type { SyncChange } from '../domain/sync'
-import { maxChanges } from '../domain/sync'
+import { maxChanges, syncChangeSchema } from '../domain/sync'
 import { library, libraryChanged } from './library'
 import type { LibraryStore } from './library'
 import { demoMode } from './useCatalog'
 
-export type SyncState =
+export type SyncState = (
   | { status: 'guest' }
   | { status: 'idle' | 'syncing'; lastSyncAt?: number }
   | { status: 'error'; message: string; lastSyncAt?: number }
   | { status: 'signed-out' }
+) & { parkedCount?: number }
 
 type SyncResponse = { cursor: number; changes: SyncChange[]; remap: Record<string, string>; more: boolean; reset?: true }
 
@@ -42,23 +43,40 @@ export function createSync(store: LibraryStore, options: { fetch?: typeof fetch;
   async function cycle() {
     if (demoMode) return
     let lastSyncAt: number | undefined
+    let parkedCount = 0
+    const parked = () => parkedCount ? { parkedCount } : {}
     try {
       let limit = maxChanges
       for (;;) {
         const account = await store.account()
         if (!account) return set({ status: 'guest' })
         lastSyncAt = account.lastSyncAt
-        if (current.status !== 'syncing') set({ status: 'syncing', lastSyncAt })
+        parkedCount = await store.parkedChanges()
+        if (current.status !== 'syncing' || (current.parkedCount ?? 0) !== parkedCount) {
+          set({ status: 'syncing', lastSyncAt, ...parked() })
+        }
         const sent = await store.pendingChanges(limit)
+        const invalid = sent.filter((change) => !syncChangeSchema.safeParse(change).success)
+        if (invalid.length) {
+          if (!await store.parkChanges(account.sub, invalid)) break
+          continue
+        }
         const response = await send('/api/sync', {
           method: 'POST',
+          signal: AbortSignal.timeout(15_000),
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ cursor: account.cursor, changes: sent }),
         })
         // The session expired: keep the library and its queue for the next sign-in.
-        if (response.status === 401) return set({ status: 'signed-out' })
-        if (response.status === 413 && limit > 1) {
-          limit = Math.ceil(limit / 2)
+        if ((await store.account())?.sub !== account.sub) break
+        if (response.status === 401) return set({ status: 'signed-out', ...parked() })
+        if ((response.status === 400 || response.status === 413) && sent.length) {
+          // Isolate a single rejected change so a batch error doesn't park healthy changes.
+          if (sent.length > 1) limit = Math.ceil(sent.length / 2)
+          else {
+            if (!await store.parkChanges(account.sub, sent)) break
+            limit = maxChanges
+          }
           continue
         }
         if (!response.ok) throw new Error(`Sync failed with ${response.status}`)
@@ -66,14 +84,16 @@ export function createSync(store: LibraryStore, options: { fetch?: typeof fetch;
         // Signed out or switched accounts while the request was out: this response belongs to nobody here now.
         if (!await store.commitSync(account.sub, sent, body)) return set(await store.account() ? { status: 'idle' } : { status: 'guest' })
         if (!body.more && !(await store.pendingChanges(1)).length) {
-          lastSyncAt = (await store.account())?.lastSyncAt
           break
         }
       }
       failures = 0
-      set({ status: 'idle', lastSyncAt })
+      const account = await store.account()
+      if (!account) return set({ status: 'guest' })
+      parkedCount = await store.parkedChanges()
+      set({ status: 'idle', lastSyncAt: account.lastSyncAt, ...parked() })
     } catch {
-      set({ status: 'error', message: failureMessage, lastSyncAt })
+      set({ status: 'error', message: failureMessage, lastSyncAt, ...parked() })
       schedule(backoff[Math.min(failures++, backoff.length - 1)])
     }
   }

@@ -34,12 +34,15 @@ let clientId: Promise<string> | undefined
 export function googleClientId(): Promise<string> {
   if (demoMode) return Promise.resolve('')
   clientId ??= fetch('/api/config', { signal: AbortSignal.timeout(6500) })
-    .then((response) => response.ok ? response.json() : undefined)
-    .then((body: unknown) => z.object({ googleClientId: z.string() }).safeParse(body).data?.googleClientId ?? '')
-  return clientId.catch(() => {
-    clientId = undefined
-    return ''
-  })
+    .then(async (response) => {
+      if (!response.ok) throw new Error(`Configuration request failed with ${response.status}`)
+      return z.object({ googleClientId: z.string() }).parse(await response.json()).googleClientId
+    })
+    .catch(() => {
+      clientId = undefined
+      return ''
+    })
+  return clientId
 }
 
 export function useGoogleClientId() {
@@ -97,8 +100,12 @@ const json = { 'Content-Type': 'application/json' }
 
 /** Thrown by `signOut(false)` when queued changes couldn't be pushed: nothing was removed and the device is still signed in. */
 export class UnsyncedChangesError extends Error {
-  constructor() {
-    super('Some changes on this device couldn’t be synced, so its library was kept and you’re still signed in. Try again when you’re online, or keep this device’s copy.')
+  constructor(reason: 'expired' | 'rejected' | 'unavailable') {
+    if (reason === 'expired') {
+      super('Your session ended before these changes could sync. Sign in again to sync them, or keep this device’s copy.')
+    } else if (reason === 'rejected') {
+      super('Some changes couldn’t sync because they were rejected. Keep this device’s copy to preserve them.')
+    } else super('Some changes on this device couldn’t be synced, so its library was kept and you’re still signed in. Try again when you’re online, or keep this device’s copy.')
   }
 }
 
@@ -109,8 +116,11 @@ export class UnsyncedChangesError extends Error {
  */
 export async function signOut(keep: boolean): Promise<boolean> {
   await sync.syncNow() // push what's queued while the session still works
-  if (!keep && (await library.pendingChanges(1)).length) throw new UnsyncedChangesError()
-  const reached = await fetch('/api/auth/logout', { method: 'POST', headers: json }).then(
+  if (!keep && await library.hasUnsyncedChanges()) {
+    const state = sync.state()
+    throw new UnsyncedChangesError(state.status === 'signed-out' ? 'expired' : state.parkedCount ? 'rejected' : 'unavailable')
+  }
+  const reached = await fetch('/api/auth/logout', { method: 'POST', headers: json, signal: AbortSignal.timeout(15_000) }).then(
     (response) => response.ok || response.status === 401,
     () => false,
   )
@@ -122,7 +132,7 @@ export async function signOut(keep: boolean): Promise<boolean> {
 
 /** Erases the account and its synced records on the server; this device keeps its library as a guest's. Throws, changing nothing, when the server doesn't confirm. */
 export async function deleteAccount(): Promise<void> {
-  const response = await fetch('/api/account', { method: 'DELETE', headers: json })
+  const response = await fetch('/api/account', { method: 'DELETE', headers: json, signal: AbortSignal.timeout(15_000) })
   if (!response.ok) throw new Error(`Account deletion failed with ${response.status}`)
   await library.setAccount(undefined)
   await sync.syncNow()
