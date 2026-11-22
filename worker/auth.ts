@@ -132,7 +132,7 @@ export function createAccountRoutes(options: { keys?: () => Promise<JsonWebKey[]
             db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
               .bind(await sha256(token), user.id, time + sessionAge),
           ])
-          return reply({ email: google.email, name: google.name }, sessionCookie(token, sessionAge))
+          return reply({ sub: google.sub, email: google.email, name: google.name }, sessionCookie(token, sessionAge))
         }
 
         if (route === 'POST /api/auth/logout') {

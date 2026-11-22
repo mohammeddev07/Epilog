@@ -2,6 +2,9 @@ import { useState } from 'react'
 import { readDefaultSort, sorts, sortPreferenceKey } from '../ui/library-preferences'
 import type { SortKey } from '../ui/library-preferences'
 import { BackupPanel } from '../ui/BackupPanel'
+import { useGoogleClientId } from '../data/account'
+import { useSync } from '../data/useSync'
+import { SignIn } from '../ui/GoogleButton'
 
 import { SelectionIndicator } from '../ui/SelectionIndicator'
 
@@ -17,6 +20,8 @@ export function Settings({ theme, onTheme, storageError, onRestore }: {
 }) {
   const [sort, setSort] = useState(readDefaultSort)
   const [sortError, setSortError] = useState(false)
+  const syncState = useSync()
+  const signInOffered = Boolean(useGoogleClientId()) && (syncState.status === 'guest' || syncState.status === 'signed-out')
   function changeSort(value: SortKey) {
     try {
       localStorage.setItem(sortPreferenceKey, value)
@@ -27,6 +32,14 @@ export function Settings({ theme, onTheme, storageError, onRestore }: {
   return (
     <div className="settings">
       <header className="page-intro"><div><h1 tabIndex={-1}>Settings</h1></div></header>
+      {/* Interim guest sign-in; Task 8's AccountPanel replaces this section. */}
+      {signInOffered ? (
+        <section aria-labelledby="account-heading" className="settings-group">
+          <h2 id="account-heading">Account</h2>
+          <p className="muted">Sign in to keep your library in sync across your devices.</p>
+          <SignIn />
+        </section>
+      ) : null}
       <section aria-labelledby="appearance-heading" className="settings-group settings-row">
         <div>
           <h2 id="appearance-heading">Appearance</h2>

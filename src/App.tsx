@@ -11,15 +11,18 @@ import { statuses } from './domain/media'
 import { library } from './data/library'
 import { useLibrary } from './data/useLibrary'
 import { sync } from './data/sync'
+import { rememberWelcome, shouldWelcome, useSignInAvailable } from './data/account'
 import type { Episode, LibraryEntry, LogDraft, Media, PreferenceChange, Status } from './domain/media'
 import { Compare } from './screens/Compare'
 import { Dashboard } from './screens/Dashboard'
 import { Details } from './screens/Details'
 import { Library } from './screens/Library'
 import { Popular } from './screens/Popular'
+import { Privacy } from './screens/Privacy'
 import { Search } from './screens/Search'
 import { appearanceKey, Settings, themes } from './screens/Settings'
 import type { Theme } from './screens/Settings'
+import { Welcome } from './screens/Welcome'
 import { readDetailOrigin } from './ui/detail-navigation'
 import type { DetailOrigin } from './ui/detail-navigation'
 import { CatalogFeedback, catalogMessage, CatalogSkeleton, offlineCacheError } from './ui/CatalogFeedback'
@@ -87,6 +90,13 @@ function Application() {
   const location = useLocation()
   const navigate = useNavigate()
   const animate = useMotionEnabled()
+  // The welcome screen only greets a visit that opened on the Dashboard; a shared link skips it for the whole visit.
+  const [openedOn] = useState(location.pathname)
+  const [welcomed, setWelcomed] = useState(false)
+  const signInAvailable = useSignInAvailable()
+  const welcoming = !welcomed && state.status === 'ready' && location.pathname === '/' && shouldWelcome(openedOn, entries.size, signInAvailable !== false)
+  const welcomePending = welcoming && signInAvailable === undefined
+  const welcome = welcoming && signInAvailable === true
   const main = useRef<HTMLElement>(null)
   const previous = useRef<{ key: string; origin?: DetailOrigin }>(undefined)
   const [retryDetail, setRetryDetail] = useState(0)
@@ -162,6 +172,20 @@ function Application() {
   }
 
   useEffect(() => sync.start(), [])
+
+  const showedWelcome = useRef(false)
+  useLayoutEffect(() => {
+    if (welcome) showedWelcome.current = true
+    else if (showedWelcome.current) {
+      showedWelcome.current = false
+      main.current?.querySelector<HTMLElement>('.page:not([hidden]) h1')?.focus({ preventScroll: true })
+    }
+  }, [welcome])
+
+  function finishWelcome(choice: 'guest' | 'google') {
+    rememberWelcome(choice)
+    setWelcomed(true)
+  }
 
   useEffect(() => {
     // Let the visible screen load first, then refresh the shelves people open next.
@@ -243,6 +267,14 @@ function Application() {
 
   const linkProps = ({ isActive }: { isActive: boolean }) => isActive ? 'nav-link active' : 'nav-link'
 
+  if (welcome) {
+    return (
+      <MotionConfig reducedMotion={animate ? 'never' : 'always'}>
+        <Welcome logo={<LogoMark size={iconSize.display} />} onGuest={() => finishWelcome('guest')} onSignedIn={() => finishWelcome('google')} />
+      </MotionConfig>
+    )
+  }
+
   return (
     <MotionConfig reducedMotion={animate ? 'never' : 'always'}>
       <div className="app-shell" data-motion={animate ? 'full' : 'reduced'} data-popular-view={path === '/popular' && !detailId || undefined}>
@@ -269,7 +301,7 @@ function Application() {
         </header>
         <main id="main-content" className="main-content" tabIndex={-1} ref={main}>
           <LayoutGroup>
-            {state.status === 'loading' ? <LibraryLoading /> : null}
+            {state.status === 'loading' || welcomePending ? <LibraryLoading /> : null}
             {state.status === 'error' ? (
               <motion.div className="empty-state" variants={rise} initial={animate ? 'hidden' : false} animate="visible">
                 <h1 tabIndex={-1}>Library unavailable</h1>
@@ -277,13 +309,14 @@ function Application() {
                 <button type="button" className="button button-secondary" onClick={retryStorage}>Try again</button>
               </motion.div>
             ) : null}
-            {path && state.status === 'ready' ? (
+            {path && state.status === 'ready' && !welcomePending ? (
               <div className="page" key={browse} hidden={Boolean(detailId)}>
                 {path === '/' ? <Dashboard entries={entries} onLog={openLog} />
                   : path === '/library' ? <Library entries={entries} view={browseParams.get('view')} defaultStatus={defaultStatus} defaultCategory={defaultCategory} highlightId={highlightId} />
                   : path === '/popular' ? <Popular entries={entries} query={query ?? ''} onLog={openLog} onComplete={completeToday} onUncomplete={uncomplete} onPreference={savePreference} />
                   : path === '/search' ? <Search entries={entries} onLog={(media, trigger, status) => openLog(media, trigger, status ?? (browseParams.get('action') === 'watch' ? 'Completed' : undefined))} />
                   : path === '/compare' ? <Compare hash={hash} entries={entries} onLog={openLog} />
+                  : path === '/privacy' ? <Privacy />
                   : path === '/settings' ? <Settings theme={theme} onTheme={changeTheme} storageError={storageError} onRestore={(count) => announce(count ? 'Backup restored.' : 'Backup reviewed. Your library is already up to date.')} />
                   : <MissingPage />}
               </div>

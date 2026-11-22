@@ -358,6 +358,22 @@ svg { flex: none; }
 .settings-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-3) var(--space-6); }
 .settings-row > .form-error { grid-column: 1 / -1; }
 .settings-credits .provider-logo { min-height: auto; margin-block: var(--space-1); }
+
+/* ---- Welcome (first visit) and privacy ---- */
+.welcome { display: grid; justify-items: center; align-content: center; gap: var(--space-5); min-height: 100dvh; padding: var(--space-9) var(--page-gutter); text-align: center; }
+.welcome h1 { max-width: 16ch; font-size: var(--text-display); }
+.welcome-actions { display: grid; gap: var(--space-3); width: min(100%, 20rem); }
+.welcome-actions > .button { min-block-size: var(--size-control); }
+.sign-in { display: grid; justify-items: center; gap: var(--space-2); }
+.sign-in:focus { outline: none; }
+/* Google's button is an iframe; reserve its height so the layout doesn't jump when it loads. */
+.google-button { display: flex; justify-content: center; min-block-size: var(--size-control); }
+.welcome .muted { font-size: var(--text-sm); }
+.privacy { display: grid; gap: var(--space-6); max-width: 40rem; }
+.privacy section { display: grid; gap: var(--space-2); }
+.privacy h2 { font-size: var(--text-md); letter-spacing: var(--tracking-tight); }
+.privacy ul { display: grid; gap: var(--space-2); padding-inline-start: var(--space-5); }
+.privacy p, .privacy li { color: var(--muted); }
 .backup-panel { gap: var(--space-2); }
 /* Segmented control over native radios: one track, the checked option gets a raised surface. */
 .segmented { display: flex; gap: var(--space-1); margin: 0; padding: var(--space-1); border: 0; border-radius: var(--radius-full); background: var(--hover); }

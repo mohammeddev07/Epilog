@@ -79,7 +79,7 @@ describe('account Worker', () => {
     expect(response.headers.get('set-cookie')).toMatch(/^__Host-epilog_session=[\w-]{43}; HttpOnly; Secure; SameSite=Lax; Path=\/; Max-Age=7776000$/)
     const raw = response.headers.get('set-cookie')!.split(/[=;]/)[1]
     expect(JSON.stringify(db.dump('sessions'))).not.toContain(raw)
-    expect(await response.json()).toEqual({ email: 'ada@example.test', name: 'Ada' })
+    expect(await response.json()).toEqual({ sub: 'google-sub-1', email: 'ada@example.test', name: 'Ada' })
     expect(db.dump('sessions')).toEqual([expect.objectContaining({ expires_at: start + 90 * day })])
 
     // Signing in again keeps the same user, refreshes the profile, and drops expired sessions.
