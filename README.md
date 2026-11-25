@@ -80,7 +80,7 @@ npm run deploy:check
 
 ### Required check for develop
 
-The [Develop validation workflow](.github/workflows/develop-validation.yml) runs lint, type checking, Vitest, and Chromium for pull requests and merge queue entries targeting `develop`.
+The [Develop validation workflow](.github/workflows/develop-validation.yml) runs lint, type checking, Vitest, and Chromium for pull requests and merge queue entries targeting `develop`. It runs again when a commit lands on `develop`.
 
 To enforce it, let the workflow run on a pull request targeting `develop`. In the repository’s **Settings → Rules → Rulesets**, create an active branch ruleset targeting `develop`. Require a pull request before merging and require the **Develop tests** status check from GitHub Actions. Enable the up-to-date requirement if the branch uses regular pull request merges. Keep the bypass list empty if everyone must pass the check. [GitHub ruleset setup](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository).
 
