@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { demoCatalog } from '../data/demo'
+import { demoCatalog } from '../../src/data/demo'
 import {
   episodeKey, episodeWatchState, inCategory, isCalendarDate, matchesQuery, nextEpisode, parseHours,
   progressText, updateEntry, updateEpisode,
-} from './media'
+} from '../../src/domain/media'
 
 const film = demoCatalog.find(({ id }) => id === 'paper-moons')!
 const game = demoCatalog.find(({ id }) => id === 'starlight-courier')!

@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { parseBackup } from '../src/domain/backup-file'
+import { parseBackup } from '../../src/domain/backup-file'
 
 const readingFigure = (page: Page, label: string) =>
   page.getByRole('region', { name: 'Reading' }).locator('.figures div').filter({ hasText: label }).locator('dd')

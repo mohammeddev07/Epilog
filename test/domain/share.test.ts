@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { LibraryEntry, Media } from './media'
-import { badges, buildProfile, compare, decodeProfile, earned, encodeProfile, itemMedia, streak } from './share'
+import type { LibraryEntry, Media } from '../../src/domain/media'
+import { badges, buildProfile, compare, decodeProfile, earned, encodeProfile, itemMedia, streak } from '../../src/domain/share'
 
 const movie = (id: string, title: string, extra: Partial<Media> = {}): Media => ({ id, title, format: 'MOVIE', anime: false, genres: [], description: '', ...extra } as Media)
 const entry = (media: Media, extra: Partial<LibraryEntry> = {}): LibraryEntry => ({
