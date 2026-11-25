@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { CatalogResponseError, fetchCatalog, isTransient } from './catalog-client'
+import { CatalogResponseError, fetchCatalog, isTransient } from '../../src/data/catalog-client'
 
 afterEach(() => vi.unstubAllGlobals())
 

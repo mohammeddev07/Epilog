@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAccountRoutes } from './auth'
-import { createCatalogWorker } from './index'
-import type { Env } from './index'
-import { createTestD1 } from './test-d1'
+import { createAccountRoutes } from '../../worker/auth'
+import { createCatalogWorker } from '../../worker/index'
+import type { Env } from '../../worker/index'
+import { createTestD1 } from '../support/test-d1'
 
 const origin = 'https://epilog.test'
 const clientId = 'fixture-client.apps.googleusercontent.com'

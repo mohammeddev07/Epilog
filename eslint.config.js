@@ -14,7 +14,6 @@ export default [
   },
   {
     files: ['worker/**/*.ts'],
-    ignores: ['worker/**/*.test.ts'],
-    rules: { 'no-restricted-imports': ['error', { patterns: [{ group: ['**/test-d1'], message: 'test-d1 is for tests only.' }] }] },
+    rules: { 'no-restricted-imports': ['error', { patterns: [{ group: ['**/test/**'], message: 'Worker code must not import test files.' }] }] },
   },
 ]

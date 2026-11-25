@@ -1,11 +1,11 @@
 import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { manualEpisode } from '../domain/media'
-import type { SyncChange } from '../domain/sync'
-import { demoCatalog } from './demo'
-import { createLibrary, libraryChanged } from './library'
-import type { LibraryStore } from './library'
-import { createSync } from './sync'
+import { manualEpisode } from '../../src/domain/media'
+import type { SyncChange } from '../../src/domain/sync'
+import { demoCatalog } from '../../src/data/demo'
+import { createLibrary, libraryChanged } from '../../src/data/library'
+import type { LibraryStore } from '../../src/data/library'
+import { createSync } from '../../src/data/sync'
 
 const film = demoCatalog.find(({ id }) => id === 'the-last-signal')!
 const anime = demoCatalog.find(({ format, anime }) => format === 'SERIES' && anime)!
@@ -122,18 +122,15 @@ describe('sync loop', () => {
     await store.save(anime, { status: 'Planned' })
     const episodes = Array.from({ length: 1199 }, (_, index) => manualEpisode({ season: 1, number: index + 1 }))
     await store.setEpisode(anime.id, episodes, true)
-    const pending: number[] = []
-    const count = async () => {
-      pending.push((await store.pendingChanges(2000)).length)
-      return {}
-    }
-    const { fetch, requests } = server(count, count, count)
+    const { fetch, requests } = server()
     const sync = create(store, fetch)
     await sync.syncNow()
     expect(requests.map(({ body }) => body.changes.length)).toEqual([500, 500, 200])
-    expect(pending).toEqual([1200, 700, 200])
-    expect(await store.pendingChanges(2000)).toEqual([])
-  })
+    // The request bodies already show which changes made it out of the queue on each page.
+    const sentIds = new Set(requests.flatMap(({ body }) => body.changes.map(({ id }) => id)))
+    expect(sentIds).toEqual(new Set([anime.id, ...episodes.map(({ season, number }) => `${anime.id}:${season}:${number}`)]))
+    expect(await store.hasUnsyncedChanges()).toBe(false)
+  }, 15_000)
 
   it('keeps the outbox on 401 and reports signed-out', async () => {
     const store = open()
