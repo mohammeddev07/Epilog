@@ -58,8 +58,9 @@ export function AccountPanel() {
     try {
       const message = await action()
       refocus.current = true
+      setAccount(null)
       setSheet(undefined)
-      setNotice(message) // the account itself re-reads with the sync state, which both actions end by changing
+      setNotice(message)
     } catch (cause) {
       setError(cause instanceof UnsyncedChangesError ? cause.message : failure)
     } finally {
@@ -84,9 +85,9 @@ export function AccountPanel() {
   return (
     <section aria-labelledby="account-heading" className="settings-group account-panel">
       <h2 id="account-heading" ref={heading} tabIndex={-1}>Account</h2>
-      {notice ? <p role="status" className="muted">{notice}</p> : null}
       {!account ? (
         <>
+          {notice ? <p role="status" className="muted">{notice}</p> : null}
           <p className="muted">Sign in to keep your library in sync across your devices.</p>
           <SignIn onSignedIn={() => { refocus.current = true; setNotice('') }} />
         </>
