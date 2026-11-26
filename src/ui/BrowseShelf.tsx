@@ -9,16 +9,17 @@ import type { BrowseQuery, DiscoverSection } from '../domain/catalog'
 import type { LibraryEntry } from '../domain/media'
 import { BrowseFeedback, CatalogSkeleton } from './CatalogFeedback'
 import { PosterGrid } from './MediaCards'
-import type { OpenLog } from './MediaCards'
+import type { OpenLog, QuickComplete } from './MediaCards'
 import { rise, useMotionEnabled } from './motion'
 import { browsePath } from './popular-navigation'
 import { iconSize } from './tokens'
 
-export function BrowseShelf({ category, query, entries, onLog, children }: {
+export function BrowseShelf({ category, query, entries, onLog, onComplete, children }: {
   category: DiscoverSection
   query: BrowseQuery
   entries: ReadonlyMap<string, LibraryEntry>
   onLog: OpenLog
+  onComplete?: QuickComplete
   children?: ReactNode
 }) {
   const section = useRef<HTMLElement>(null)
@@ -48,7 +49,7 @@ export function BrowseShelf({ category, query, entries, onLog, children }: {
         </Link>
       </div>
       {children}
-      {items.length ? <PosterGrid items={items} entries={entries} shelf={heading} onLog={onLog} titleLink={(media) => browsePath(category, query, mediaKey(media))} /> : null}
+      {items.length ? <PosterGrid items={items} entries={entries} shelf={heading} onLog={onLog} onComplete={onComplete} titleLink={(media) => browsePath(category, query, mediaKey(media))} /> : null}
       {(!active || feed.loading) && !items.length ? <CatalogSkeleton /> : null}
       <BrowseFeedback {...feed} />
       {active && !feed.loading && !items.length ? (

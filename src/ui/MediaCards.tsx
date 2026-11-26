@@ -1,6 +1,6 @@
 import { BookOpenIcon, CheckIcon, FilmSlateIcon, GameControllerIcon, PlusIcon, TelevisionIcon } from '@phosphor-icons/react'
 import { AnimatePresence, motion, useIsPresent } from 'motion/react'
-import { useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import type { ComponentProps } from 'react'
 import { Link } from 'react-router'
 import { mediaKey } from '../domain/catalog'
@@ -9,8 +9,10 @@ import type { LibraryEntry, Media, Status } from '../domain/media'
 import { titlePath, useOpenDetail } from './detail-navigation'
 import { layoutSpring, rise, useMotionEnabled } from './motion'
 import { iconSize } from './tokens'
+import { useHold } from './useHold'
 
 export type OpenLog = (media: Media, trigger: HTMLElement, initialStatus?: Status) => void
+export type QuickComplete = (media: Media) => Promise<void>
 
 export function Poster({ media, sharedId, eager = false }: { media: Media; sharedId?: string; eager?: boolean }) {
   const [failedSource, setFailedSource] = useState<string>()
@@ -79,13 +81,14 @@ interface GridProps {
   entries: ReadonlyMap<string, LibraryEntry>
   shelf: string
   onLog?: OpenLog
+  /** When set, tapping + marks the title done today; holding opens the log editor. */
+  onComplete?: QuickComplete
   titleLink?: (media: Media) => string
   highlightId?: string
 }
 
-export function PosterGrid({ items, entries, shelf, onLog, titleLink, highlightId }: GridProps) {
+export function PosterGrid({ items, entries, shelf, onLog, onComplete, titleLink, highlightId }: GridProps) {
   const animate = useMotionEnabled()
-  const openDetail = useOpenDetail()
   const byKey = new Map([...entries.values()].map((entry) => [mediaKey(entry.media), entry]))
 
   return (
@@ -128,35 +131,54 @@ export function PosterGrid({ items, entries, shelf, onLog, titleLink, highlightI
             >
               {titleLink ? <Link id={id} to={titleLink(media)} className="poster-link">{content}</Link>
                 : <DetailLink id={id} media={entry?.media ?? media} className="poster-link">{content}</DetailLink>}
-              {onLog ? (
-                <button
-                  className="poster-action"
-                  id={`${id}-action`}
-                  type="button"
-                  data-saved={Boolean(entry)}
-                  aria-label={entry ? `Open saved entry for ${media.title}` : `Log ${media.title}`}
-                  onClick={(event) => {
-                    if (entry) openDetail(entry.media.id, event.currentTarget.id, id)
-                    else onLog(media, event.currentTarget)
-                  }}
-                >
-                  <motion.span
-                    key={entry ? 'saved' : 'add'}
-                    variants={rise}
-                    initial={animate ? 'hidden' : false}
-                    animate="visible"
-                    aria-hidden="true"
-                  >
-                    {entry ? <CheckIcon size={iconSize.compact} weight="bold" /> : <PlusIcon size={iconSize.compact} weight="bold" />}
-                  </motion.span>
-                </button>
-              ) : null}
+              {onLog ? <PosterAction id={`${id}-action`} cardId={id} media={media} entry={entry} onLog={onLog} onComplete={onComplete} /> : null}
             </AnimatedListItem>
           )
         })}
       </AnimatePresence>
     </ul>
   )
+}
+
+/** One button for both states, so a dialog it opened can return focus to it after the save. */
+function PosterAction({ id, cardId, media, entry, onLog, onComplete }: {
+  id: string; cardId: string; media: Media; entry?: LibraryEntry; onLog: OpenLog; onComplete?: QuickComplete
+}) {
+  const animate = useMotionEnabled()
+  const openDetail = useOpenDetail()
+  const hint = useId()
+  const [busy, setBusy] = useState(false)
+  const pending = useRef(false)
+  const { holding, handlers } = useHold({
+    disabled: busy,
+    onHold: (trigger) => onLog(media, trigger),
+    onTap: () => {
+      if (pending.current) return
+      pending.current = true
+      setBusy(true)
+      void onComplete?.(media).finally(() => { pending.current = false; setBusy(false) })
+    },
+  })
+  const done = media.format === 'BOOK' ? 'read' : media.format === 'GAME' ? 'played' : 'watched'
+  const quick = Boolean(onComplete) && !entry
+  const label = entry ? `Open saved entry for ${media.title}` : onComplete ? `Mark ${media.title} ${done}` : `Log ${media.title}`
+
+  return <>
+    <button className="poster-action" id={id} type="button" data-saved={Boolean(entry)} aria-label={label}
+      aria-describedby={quick ? hint : undefined} aria-disabled={busy || undefined}
+      {...(quick ? handlers : {
+        onClick: (event) => {
+          if (entry) openDetail(entry.media.id, event.currentTarget.id, cardId)
+          else onLog(media, event.currentTarget)
+        },
+      } satisfies ComponentProps<'button'>)}>
+      <motion.span key={entry ? 'saved' : 'add'} variants={rise} initial={animate ? 'hidden' : false} animate="visible" aria-hidden="true">
+        {entry ? <CheckIcon size={iconSize.compact} weight="bold" /> : <PlusIcon size={iconSize.compact} weight="bold" />}
+        {holding && <svg className="hold-ring" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" pathLength="1" /></svg>}
+      </motion.span>
+    </button>
+    {quick ? <span className="sr-only" id={hint}>Hold or press Shift+Enter to open the log editor.</span> : null}
+  </>
 }
 
 export function ProgressList({ entries, label }: { entries: readonly LibraryEntry[]; label: string }) {

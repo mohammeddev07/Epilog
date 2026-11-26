@@ -226,7 +226,7 @@ svg { flex: none; }
   padding: var(--space-1); color: var(--on-overlay); background: transparent;
   transition: transform var(--motion-fast) var(--motion-ease);
 }
-.poster-action span { display: grid; place-items: center; width: var(--size-poster-mark); aspect-ratio: 1; border-radius: var(--radius-full); background: var(--overlay); box-shadow: var(--shadow-sm); }
+.poster-action span { position: relative; display: grid; place-items: center; width: var(--size-poster-mark); aspect-ratio: 1; border-radius: var(--radius-full); background: var(--overlay); box-shadow: var(--shadow-sm); }
 .poster-action[data-saved='true'] span { background: var(--accent); color: var(--on-accent); }
 /* Two-tone ring so focus reads on any poster art: --on-overlay outline over an --overlay-halo fill. */
 .poster-action:focus-visible { outline-color: var(--on-overlay); box-shadow: 0 0 0 calc(var(--focus-offset) + var(--focus-width)) var(--overlay-halo); }
@@ -433,7 +433,8 @@ body, .sidebar, .mobile-header, .mobile-nav, .settings-group, .segmented, .selec
 
 /* ---- Feedback ---- */
 .save-announcement { pointer-events: none; position: fixed; z-index: var(--z-toast); inset: auto max(var(--space-4), env(safe-area-inset-right)) var(--space-4) max(var(--space-4), env(safe-area-inset-left)); display: flex; justify-content: end; }
-.save-announcement span { position: absolute; right: 0; bottom: 0; padding: var(--space-3) var(--space-5); color: var(--bg); background: var(--text); border-radius: var(--radius-full); box-shadow: var(--shadow-md); font-weight: var(--weight-semibold); font-size: var(--text-sm); }
+.toast-action { pointer-events: auto; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: 0.2em; cursor: pointer; }
+.save-announcement > span { display: flex; align-items: center; gap: var(--space-3); position: absolute; right: 0; bottom: 0; padding: var(--space-3) var(--space-5); color: var(--bg); background: var(--text); border-radius: var(--radius-full); box-shadow: var(--shadow-md); font-weight: var(--weight-semibold); font-size: var(--text-sm); }
 .update-banner {
   position: fixed; z-index: var(--z-banner); inset: auto var(--space-4) var(--space-4) auto; width: min(calc(100% - var(--space-8)), 24rem);
   display: grid; gap: var(--space-3); padding: var(--space-4); color: var(--text);

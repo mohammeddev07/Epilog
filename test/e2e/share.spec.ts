@@ -43,9 +43,9 @@ test('shares a library by link, compares taste, logs a pick, and sends a link ba
     await expect(other.getByRole('list', { name: 'Both seen' }).getByRole('link')).toHaveText([/The Last Signal/])
     expect((await new AxeBuilder({ page: other }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()).violations).toEqual([])
 
-    await picks.getByRole('button', { name: 'Log Paper Moons' }).click()
-    await other.getByRole('dialog').getByRole('button', { name: 'Save to library' }).click()
-    await expect(picks.getByRole('button', { name: 'Open saved entry for Paper Moons' })).toBeVisible()
+    await picks.getByRole('button', { name: 'Mark Paper Moons watched' }).click()
+    await expect(other.getByRole('list', { name: 'Both seen' }).getByRole('link')).toHaveText([/Paper Moons/, /The Last Signal/])
+    await expect(picks.getByRole('link')).toHaveText([/Starlight Courier/])
 
     await other.getByRole('button', { name: 'Send yours back' }).click()
     await expect(other.getByRole('dialog', { name: 'Share your library' }).getByLabel('Share link')).toHaveValue(/\/compare#p=/)
