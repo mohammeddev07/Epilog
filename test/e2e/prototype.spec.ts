@@ -12,9 +12,9 @@ async function assertAccessible(page: Page) {
 test('logs a film by keyboard, announces the save, and restores focus to the saved action', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Continue watching & playing' })).toHaveCount(0)
-  const add = page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Log The Last Signal' })
+  const add = page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Mark The Last Signal watched' })
   await add.focus()
-  await page.keyboard.press('Enter')
+  await page.keyboard.press('Shift+Enter')
   const editor = page.getByRole('dialog', { name: 'Log a title' })
   const planned = editor.getByRole('radio', { name: 'Planned' })
   await expect(planned).toBeFocused()
@@ -35,6 +35,18 @@ test('logs a film by keyboard, announces the save, and restores focus to the sav
   await expect(saved).toBeFocused()
 })
 
+test('marks a poster watched in one tap and undoes it from the toast', async ({ page }) => {
+  await page.goto('/')
+  const shelf = page.getByRole('list', { name: 'Popular This Week' })
+  await shelf.getByRole('button', { name: 'Mark The Last Signal watched' }).click()
+  await expect(page.getByRole('status')).toHaveText('The Last Signal marked watched.')
+  await expect(shelf.getByRole('button', { name: 'Open saved entry for The Last Signal' })).toBeVisible()
+  await expect(page.getByRole('list', { name: 'Recently logged' })).toContainText('The Last Signal')
+  await page.getByRole('button', { name: 'Undo' }).click()
+  await expect(page.getByRole('status')).toHaveText('The Last Signal marked unwatched.')
+  await expect(shelf.getByRole('button', { name: 'Mark The Last Signal watched' })).toBeVisible()
+})
+
 test('search keeps the same focused card after saving and supports editing game hours', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByRole('link', { name: 'Watch', exact: true })).toHaveCount(0)
@@ -42,7 +54,7 @@ test('search keeps the same focused card after saving and supports editing game 
   const query = page.getByRole('searchbox', { name: 'Search catalog' })
   await expect(query).toBeFocused()
   await query.fill('Starlight')
-  await page.getByRole('button', { name: 'Log Starlight Courier' }).click()
+  await page.getByRole('button', { name: 'Mark Starlight Courier played' }).press('Shift+Enter')
   const editor = page.getByRole('dialog')
   await expect(editor.getByRole('radio', { name: 'Planned' })).toBeChecked()
   await editor.getByRole('radio', { name: 'In progress' }).check()
@@ -82,7 +94,7 @@ test('tracks both series formats and keeps one anime film entry across library f
     await expect(page.getByRole('status')).toHaveText(`${first} marked unwatched.`)
   }
   await page.getByRole('link', { name: 'Dashboard', exact: true }).click()
-  await page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Log Paper Moons' }).click()
+  await page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Mark Paper Moons watched' }).press('Shift+Enter')
   await page.getByRole('button', { name: 'Save to library' }).click()
   const grid = page.getByRole('list', { name: 'Library titles' })
   for (const section of [/^Movies/, /^Anime/]) { // an anime film appears once in each
@@ -100,7 +112,7 @@ test('provides a single-row phone shelf and a touch editor at larger text sizes'
   await page.goto('/')
   const grid = page.getByRole('list', { name: 'Popular This Week', exact: true })
   expect(await grid.evaluate((element) => getComputedStyle(element).gridTemplateRows.split(' ').length)).toBe(1)
-  await page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Log Paper Moons' }).tap()
+  await page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Mark Paper Moons watched' }).press('Shift+Enter')
   const editor = page.getByRole('dialog')
   const bounds = await editor.boundingBox()
   expect(Math.round((bounds?.y ?? 0) + (bounds?.height ?? 0))).toBe(844)
@@ -124,19 +136,19 @@ test('passes accessibility checks in light and dark and disables transitions on 
   await page.getByRole('link', { name: 'Dashboard', exact: true }).click()
   await assertAccessible(page)
   await page.getByRole('button', { name: 'TV Shows', exact: true }).click()
-  await page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Log Northbound' }).click()
+  await page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Mark Northbound watched' }).press('Shift+Enter')
   const dialog = page.getByRole('dialog')
   expect(await dialog.evaluate((element) => getComputedStyle(element).transitionDuration)).toBe('0s')
   await assertAccessible(page)
   await page.keyboard.press('Escape')
-  await expect(page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Log Northbound' })).toBeFocused()
+  await expect(page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Mark Northbound watched' })).toBeFocused()
 })
 
 test('fits the tablet layout and exposes the editor in the accessibility tree', async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 1180 })
   await page.goto('/')
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(820)
-  await page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Log Paper Moons' }).click()
+  await page.getByRole('list', { name: 'Popular This Week' }).getByRole('button', { name: 'Mark Paper Moons watched' }).press('Shift+Enter')
   const dialog = page.getByRole('dialog')
   await expect(dialog).toMatchAriaSnapshot(`
     - dialog "Log a title":

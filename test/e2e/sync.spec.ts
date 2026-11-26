@@ -113,7 +113,7 @@ async function open(browser: import('@playwright/test').Browser, server: ReturnT
 async function logFromSearch(page: Page, name: string) {
   await page.goto('/search')
   await page.getByRole('searchbox').fill(name)
-  await page.getByRole('button', { name: `Log ${name}`, exact: true }).click()
+  await page.getByRole('button', { name: new RegExp(`^Mark ${name} (watched|played|read)$`) }).press('Shift+Enter')
   await page.getByRole('dialog').getByRole('button', { name: 'Save to library' }).click()
   await expect(page.getByRole('button', { name: `Open saved entry for ${name}` })).toBeVisible()
 }

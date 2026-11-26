@@ -1,6 +1,6 @@
 import { BookOpenIcon, BookmarkSimpleIcon, EyeIcon, GameControllerIcon, HeartIcon, StarIcon } from '@phosphor-icons/react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useEffect, useEffectEvent, useId, useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import { displayDate, isWatchlisted, latestCompletion, ratings, trackingAction } from '../domain/media'
 import type { LibraryEntry, Media, PreferenceChange } from '../domain/media'
@@ -8,6 +8,7 @@ import type { OpenLog } from './MediaCards'
 import { crossfade, duration, easeOut, useMotionEnabled } from './motion'
 import { useModal } from './useModal'
 import { SheetHeader } from './Sheet'
+import { useHold } from './useHold'
 import { iconSize } from './tokens'
 
 export type SavePreference = (media: Media, change: PreferenceChange) => Promise<void>
@@ -21,9 +22,6 @@ interface Props {
   onUncomplete: (media: Media) => Promise<void>
   onPreference: SavePreference
 }
-
-const holdDuration = duration.hold * 1000
-const holdMovementTolerance = 10
 
 export function PopularActions({ media, entry, onInteract, onLog, onComplete, onUncomplete, onPreference }: Props) {
   const [ratingOpen, setRatingOpen] = useState(false)
@@ -200,79 +198,13 @@ function WatchAction({ media, entry, busy, saving, buttonRef, onTap, onUndo, onH
   const completed = entry?.status === 'Completed'
   const WatchIcon = media.format === 'BOOK' ? BookOpenIcon : media.format === 'GAME' ? GameControllerIcon : EyeIcon
   const label = trackingAction(media, entry)
-  const press = useRef<{ id: number; x: number; y: number; timer: number } | undefined>(undefined)
-  const suppressClick = useRef(false)
-
-  const [holding, setHolding] = useState(false)
-
-  const cancelHold = useEffectEvent(interrupt)
-  useEffect(() => {
-    window.addEventListener('blur', cancelHold)
-    document.addEventListener('visibilitychange', cancelHold)
-    return () => {
-      window.removeEventListener('blur', cancelHold)
-      document.removeEventListener('visibilitychange', cancelHold)
-      window.clearTimeout(press.current?.timer)
-    }
-  }, [])
-
-  function interrupt() {
-    if (!press.current) return
-    suppressClick.current = true
-    stopPress()
-  }
-
-  function stopPress() {
-    window.clearTimeout(press.current?.timer)
-    press.current = undefined
-    setHolding(false)
-  }
+  const { holding, handlers } = useHold({ disabled: busy, onTap: () => (completed ? onUndo() : onTap()), onHold })
 
   return (
     <>
       <button
         ref={buttonRef} type="button" className="button popular-action popular-watch-action" data-active={completed || undefined} aria-disabled={busy}
-        aria-describedby={hint} aria-keyshortcuts="Shift+Enter"
-        onPointerDown={(event) => {
-          if (busy || !event.isPrimary || event.button !== 0) return
-          const trigger = event.currentTarget
-          stopPress()
-          suppressClick.current = false
-          setHolding(true)
-          trigger.setPointerCapture(event.pointerId)
-          const timer = window.setTimeout(() => {
-            suppressClick.current = true
-            stopPress()
-            onHold(trigger)
-          }, holdDuration)
-          press.current = { id: event.pointerId, x: event.clientX, y: event.clientY, timer }
-        }}
-        onPointerMove={(event) => {
-          const start = press.current
-          if (start?.id !== event.pointerId) return
-          if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > holdMovementTolerance) {
-            interrupt()
-          }
-        }}
-        onPointerUp={(event) => { if (press.current?.id === event.pointerId) stopPress() }}
-        // After a hold the sheet rises under the finger; cancel the tap the browser would fire on lift-off.
-        onTouchEnd={(event) => { if (suppressClick.current) event.preventDefault() }}
-        onPointerCancel={(event) => { if (press.current?.id === event.pointerId) interrupt() }}
-        onLostPointerCapture={(event) => { if (press.current?.id === event.pointerId) interrupt() }}
-        onBlur={interrupt}
-        onContextMenu={(event) => event.preventDefault()}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') interrupt()
-          if (event.key !== 'Enter' || !event.shiftKey) return
-          event.preventDefault()
-          if (!busy && !event.repeat) onHold(event.currentTarget)
-        }}
-        onClick={(event) => {
-          if (event.detail > 0 && suppressClick.current) return
-          if (busy) return
-          if (completed) onUndo()
-          else onTap()
-        }}
+        aria-describedby={hint} {...handlers}
       >
         <ToggleIcon on={completed} className="toggle-icon watch-icon">
           <WatchIcon size={iconSize.xl} /><WatchIcon size={iconSize.xl} weight="fill" />

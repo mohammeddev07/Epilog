@@ -84,7 +84,7 @@ function Application() {
   const [storageError, setStorageError] = useState(false)
   const [session, setSession] = useState<LogSession | null>(null)
   const [logOpen, setLogOpen] = useState(false)
-  const [announcement, setAnnouncement] = useState({ message: '', id: 0 })
+  const [announcement, setAnnouncement] = useState<{ message: string; id: number; undo?: () => void }>({ message: '', id: 0 })
   const [dismissedAnnouncement, setDismissedAnnouncement] = useState(0)
   const [highlightId, setHighlightId] = useState<string>()
   const location = useLocation()
@@ -199,9 +199,9 @@ function Application() {
 
   useEffect(() => {
     if (!announcement.id) return
-    const timer = window.setTimeout(() => setDismissedAnnouncement(announcement.id), 4000)
+    const timer = window.setTimeout(() => setDismissedAnnouncement(announcement.id), announcement.undo ? 6000 : 4000)
     return () => window.clearTimeout(timer)
-  }, [announcement.id])
+  }, [announcement.id, announcement.undo])
 
   useEffect(() => {
     if (!highlightId) return
@@ -209,8 +209,8 @@ function Application() {
     return () => window.clearTimeout(timer)
   }, [highlightId, announcement.id])
 
-  function announce(message: string) {
-    setAnnouncement((previous) => ({ message, id: previous.id + 1 }))
+  function announce(message: string, undo?: () => void) {
+    setAnnouncement((previous) => ({ message, id: previous.id + 1, undo }))
   }
 
   const editing = session ? entries.get(session.media.id) ?? [...entries.values()].find((entry) => mediaKey(entry.media) === mediaKey(session.media)) : undefined
@@ -232,6 +232,19 @@ function Application() {
     if (!changed) return
     setHighlightId(id)
     announce(`${media.title} marked ${media.format === 'BOOK' ? 'read' : media.format === 'GAME' ? 'played' : 'watched'}.`)
+  }
+
+  /** One tap from a poster card: logs today, offers Undo, and reports failures in the toast. */
+  async function quickComplete(media: Media) {
+    try {
+      const { id, changed } = await library.completeToday(media)
+      if (!changed) return
+      setHighlightId(id)
+      // Undo announces its own result, which replaces this toast.
+      announce(`${media.title} marked ${media.format === 'BOOK' ? 'read' : media.format === 'GAME' ? 'played' : 'watched'}.`, () => void uncomplete(media))
+    } catch {
+      announce(`Couldn’t save ${media.title}. Try again.`)
+    }
   }
 
   async function uncomplete(media: Media) {
@@ -311,11 +324,11 @@ function Application() {
             ) : null}
             {path && state.status === 'ready' && !welcomePending ? (
               <div className="page" key={browse} hidden={Boolean(detailId)}>
-                {path === '/' ? <Dashboard entries={entries} onLog={openLog} />
+                {path === '/' ? <Dashboard entries={entries} onLog={openLog} onComplete={quickComplete} />
                   : path === '/library' ? <Library entries={entries} view={browseParams.get('view')} defaultStatus={defaultStatus} defaultCategory={defaultCategory} highlightId={highlightId} />
                   : path === '/popular' ? <Popular entries={entries} query={query ?? ''} onLog={openLog} onComplete={completeToday} onUncomplete={uncomplete} onPreference={savePreference} />
-                  : path === '/search' ? <Search entries={entries} onLog={(media, trigger, status) => openLog(media, trigger, status ?? (browseParams.get('action') === 'watch' ? 'Completed' : undefined))} />
-                  : path === '/compare' ? <Compare hash={hash} entries={entries} onLog={openLog} />
+                  : path === '/search' ? <Search entries={entries} onComplete={quickComplete} onLog={(media, trigger, status) => openLog(media, trigger, status ?? (browseParams.get('action') === 'watch' ? 'Completed' : undefined))} />
+                  : path === '/compare' ? <Compare hash={hash} entries={entries} onLog={openLog} onComplete={quickComplete} />
                   : path === '/privacy' ? <Privacy />
                   : path === '/settings' ? <Settings theme={theme} onTheme={changeTheme} storageError={storageError} onRestore={(count) => announce(count ? 'Backup restored.' : 'Backup reviewed. Your library is already up to date.')} />
                   : <MissingPage />}
@@ -358,11 +371,12 @@ function Application() {
         <div className="sr-only" role="status" aria-atomic="true">
           <span key={announcement.id}>{announcement.message}</span>
         </div>
-        <div className="save-announcement" aria-hidden="true">
+        <div className="save-announcement">
           <AnimatePresence>
             {announcement.id > dismissedAnnouncement ? (
               <motion.span key={announcement.id} variants={rise} initial={animate ? 'hidden' : false} animate="visible" exit={animate ? 'exit' : undefined}>
-                {announcement.message}
+                <span aria-hidden="true">{announcement.message}</span>
+                {announcement.undo ? <button type="button" className="toast-action" onClick={announcement.undo}>Undo</button> : null}
               </motion.span>
             ) : null}
           </AnimatePresence>
