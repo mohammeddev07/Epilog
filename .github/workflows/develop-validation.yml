@@ -28,4 +28,8 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npx --no-install playwright install --with-deps chromium
+      - name: Repeat the account sign-out scenario
+        run: >-
+          npx --no-install playwright test test/e2e/sync.spec.ts
+          --grep 'signing out can keep or remove this device' --repeat-each=5 --workers=2
       - run: npm test

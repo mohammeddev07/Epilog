@@ -446,10 +446,15 @@ test('signing out can keep or remove this device’s copy', async ({ browser }) 
     await expect(await movieTitles(page)).toContainText('Sun Harbor')
 
     // Once it has synced, removing works even while the server can't hear about the sign-out, and says so.
-    server.network.offline = false
-    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
-    await expect.poll(() => server.records('sub-ada', 'entry').length).toBe(2)
     await page.goto('/settings')
+    const retry = account.getByRole('button', { name: 'Try again' })
+    await expect(retry).toBeVisible()
+    server.network.offline = false
+    await retry.click()
+    await expect.poll(() => server.records('sub-ada', 'entry').length).toBe(2)
+    // Let the browser commit the sync result before going offline again.
+    await expect(account.getByRole('alert')).toHaveCount(0)
+    await expect(account.getByRole('status')).toContainText('Last synced')
     server.network.offline = true
     await account.getByRole('button', { name: 'Sign out' }).click()
     await dialog.getByRole('button', { name: 'Remove it from this device' }).click()
