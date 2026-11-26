@@ -40,10 +40,10 @@ test('keeps an early provider result usable while the other provider returns a 4
   })
   await page.goto('/search')
   await page.getByRole('searchbox').fill('Moon Lantern')
-  const add = page.getByRole('button', { name: 'Log Moon Lantern' })
+  const add = page.getByRole('button', { name: 'Mark Moon Lantern watched' })
   await expect(add).toBeVisible()
   await expect(page.getByText('Checking IGDB…')).toBeVisible()
-  await add.click()
+  await add.press('Shift+Enter')
   await page.getByRole('dialog').getByRole('button', { name: 'Save to library' }).click()
   const saved = page.getByRole('button', { name: 'Open saved entry for Moon Lantern' })
   await expect(saved).toBeFocused()
@@ -74,8 +74,8 @@ test('ignores superseded searches and keeps a distinct game in the unified resul
   try {
     await obsolete.promise
     await field.fill('Moon')
-    await expect(page.getByRole('button', { name: 'Log Moon Lantern Game' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Log Moon Lantern', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Mark Moon Lantern Game played' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Mark Moon Lantern watched', exact: true })).toBeVisible()
   } finally {
     releaseObsolete.resolve()
   }

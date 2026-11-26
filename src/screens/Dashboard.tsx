@@ -10,13 +10,14 @@ import type { LibraryEntry } from '../domain/media'
 import { BrowseShelf } from '../ui/BrowseShelf'
 import { CategoryPicker } from '../ui/CategoryPicker'
 import { ProgressList } from '../ui/MediaCards'
-import type { OpenLog } from '../ui/MediaCards'
+import type { OpenLog, QuickComplete } from '../ui/MediaCards'
 import { ReleaseDatePicker } from '../ui/ReleaseDatePicker'
 import { iconSize } from '../ui/tokens'
 
-export function Dashboard({ entries, onLog }: {
+export function Dashboard({ entries, onLog, onComplete }: {
   entries: ReadonlyMap<string, LibraryEntry>
   onLog: OpenLog
+  onComplete: QuickComplete
 }) {
   const [category, setCategory] = useState<DiscoverSection>(defaultPopularCategory)
   const [bookType, setBookType] = useState<BookType>()
@@ -58,7 +59,7 @@ export function Dashboard({ entries, onLog }: {
       {browseModes.map((mode) => {
         const query: BrowseQuery = { ...(mode === 'release' ? { mode, period } : { mode }), bookType: category === 'Books' ? bookType : undefined }
         return (
-          <BrowseShelf key={mode} category={category} query={query} entries={entries} onLog={onLog}>
+          <BrowseShelf key={mode} category={category} query={query} entries={entries} onLog={onLog} onComplete={onComplete}>
             {mode === 'popular' ? <CategoryPicker value={category} options={discoverSections} onChange={setCategory} label={popularTitle + ' categories'} /> : null}
             {mode === 'popular' && category === 'Books' && <BookTypeFilter value={bookType} onChange={setBookType} />}
             {mode === 'release' ? <ReleaseDatePicker value={period} onChange={setPeriod} /> : null}

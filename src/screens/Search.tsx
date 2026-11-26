@@ -9,13 +9,14 @@ import { categories, inCategory, matchesQuery } from '../domain/media'
 import type { Category, LibraryEntry } from '../domain/media'
 import { CatalogFeedback, catalogMessage, CatalogSkeleton, offlineCacheError } from '../ui/CatalogFeedback'
 import { PosterGrid } from '../ui/MediaCards'
-import type { OpenLog } from '../ui/MediaCards'
+import type { OpenLog, QuickComplete } from '../ui/MediaCards'
 import { crossfade, useMotionEnabled } from '../ui/motion'
 import { SearchField } from '../ui/SearchField'
 
-export function Search({ entries, onLog }: {
+export function Search({ entries, onLog, onComplete }: {
   entries: ReadonlyMap<string, LibraryEntry>
   onLog: OpenLog
+  onComplete: QuickComplete
 }) {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<Category>('All')
@@ -73,7 +74,7 @@ export function Search({ entries, onLog }: {
       {found > 0 || loading ? (
         <section className="shelf" aria-labelledby="catalog-matches-heading">
           <h2 id="catalog-matches-heading">{active ? 'Search results' : demoMode ? 'Browse titles' : 'In your library'}</h2>
-          {found ? <PosterGrid items={items} entries={entries} shelf="Search results" onLog={onLog} />
+          {found ? <PosterGrid items={items} entries={entries} shelf="Search results" onLog={onLog} onComplete={onComplete} />
             : <CatalogSkeleton />}
         </section>
       ) : null}

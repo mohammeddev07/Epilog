@@ -6,13 +6,13 @@ import { compare, decodeProfile, itemMedia } from '../domain/share'
 import type { Profile } from '../domain/share'
 import { EarnedBadges } from '../ui/Badges'
 import { PosterGrid } from '../ui/MediaCards'
-import type { OpenLog } from '../ui/MediaCards'
+import type { OpenLog, QuickComplete } from '../ui/MediaCards'
 import { ShareDialog } from '../ui/ShareDialog'
 import { iconSize } from '../ui/tokens'
 
 type Decoded = { payload: string; profile?: Profile; error?: string }
 
-export function Compare({ entries, onLog, hash }: { hash?: string; entries: ReadonlyMap<string, LibraryEntry>; onLog: OpenLog }) {
+export function Compare({ entries, onLog, onComplete, hash }: { hash?: string; entries: ReadonlyMap<string, LibraryEntry>; onLog: OpenLog; onComplete: QuickComplete }) {
   const payload = new URLSearchParams(hash).get('p') ?? ''
   const [decoded, setDecoded] = useState<Decoded>()
   const [sharing, setSharing] = useState(false)
@@ -75,7 +75,7 @@ export function Compare({ entries, onLog, hash }: { hash?: string; entries: Read
       {picks.length ? (
         <section className="shelf" aria-labelledby="picks-heading">
           <h2 id="picks-heading">{owner === 'A friend' ? 'Their' : `${owner}’s`} picks you haven’t seen</h2>
-          <PosterGrid items={picks.map(itemMedia)} entries={entries} shelf="Picks you haven’t seen" onLog={onLog} />
+          <PosterGrid items={picks.map(itemMedia)} entries={entries} shelf="Picks you haven’t seen" onLog={onLog} onComplete={onComplete} />
         </section>
       ) : null}
       {shared.length ? (
